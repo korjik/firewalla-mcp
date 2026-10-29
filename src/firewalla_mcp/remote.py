@@ -198,13 +198,31 @@ def write_state(spec):
     import hashlib
     argv,tag=write_spec(spec)
     if spec["kind"]=="route":
-        rows=json.loads(run(["ip","-4","-j","route","show","table","all"]))
+        rows=json.loads(run(["ip","-4","-N","-j","route","show","table","all"]))
         if not isinstance(rows,list):
             raise Unsupported("route schema")
-        rows=[r for r in rows if str(r.get("table","main"))==str(spec["table"])]
-        canonical=json.dumps(sorted(rows,key=lambda r:json.dumps(r,sort_keys=True)),sort_keys=True)
-        destination=str(ipaddress.IPv4Network(spec["destination"]))
-        exists=any(r.get("dst","0.0.0.0/0")==destination or (destination=="0.0.0.0/0" and r.get("dst")=="default") for r in rows)
+        normalized=[]
+        for row in rows:
+            if not isinstance(row,dict):
+                raise Unsupported("route row schema")
+            table=row.get("table",254)
+            if isinstance(table,str) and table in ("unspec","default","main","local"):
+                table={"unspec":0,"default":253,"main":254,"local":255}[table]
+            elif isinstance(table,str) and re.fullmatch(r"[0-9]{1,10}",table):
+                table=int(table)
+            if type(table) is not int or not 0<=table<=4294967295:
+                # -N must resolve custom names. Never silently omit a possibly matching table.
+                raise Unsupported("numeric route tables required")
+            if table!=spec["table"]:
+                continue
+            destination=row.get("dst")
+            if not isinstance(destination,str) or not destination:
+                raise Unsupported("route destination schema")
+            destination=str(ipaddress.IPv4Network("0.0.0.0/0" if destination=="default" else destination,strict=True))
+            normalized.append({**row,"table":table,"dst":destination})
+        canonical=json.dumps(sorted(normalized,key=lambda r:json.dumps(r,sort_keys=True)),sort_keys=True)
+        destination=str(ipaddress.IPv4Network(spec["destination"],strict=True))
+        exists=any(row["dst"]==destination for row in normalized)
     else:
         table="filter" if spec["kind"]=="filter_rule" else "nat"
         canonical=run(["sudo","-n","iptables","-w","2","-t",table,"-S",spec["chain"]])
@@ -527,6 +545,39 @@ def service_features(feature):
 MANAGEMENT_REVISION = '4b4d9fecbd9fd56613ffba91a7c88b26f1b67396'
 
 
+def canonical_rule_ip(value):
+    if not isinstance(value,str) or '%' in value or any(c.isspace() or ord(c)<32 or ord(c)==127 for c in value):
+        raise ValueError('unscoped literal IP required')
+    return str(ipaddress.ip_address(value))
+
+
+def rule_identity(kind,target):
+    if not isinstance(kind,str) or not isinstance(target,str):
+        raise Unsupported('rule identity schema')
+    if kind in ('dns','domain'):
+        return ('dns',target.lower())
+    if kind=='mac':
+        return (kind,target.upper())
+    if kind=='ip':
+        if '%' in target or any(c.isspace() or ord(c)<32 or ord(c)==127 for c in target):
+            raise Unsupported('scoped or malformed existing IP rule')
+        return (kind,str(ipaddress.ip_network(target,strict=False)))
+    return (kind,target)
+
+
+def managed_rule_matches(row,desired,spec,disabled):
+    if not row or len(row)<9:
+        return False
+    matched=row[1:5]==[desired['type'],desired['target'],desired['action'],'outbound'] and (desired['type']=='mac' or json.loads(row[5])==[spec['device']]) and row[6] in (('1',) if disabled else (False,'0',None,'')) and row[8] in (False,None,'')
+    if 'schedule' in spec:
+        matched=matched and len(row)>9 and row[7]==desired['cronTime'] and str(row[9])==str(desired['duration'])
+    else:
+        matched=matched and row[7] in (False,None,'')
+    if spec['rule_type']=='dns_override':
+        matched=matched and len(row)>12 and row[10]==desired['resolver'] and row[11] in ('0','false') and row[12] in ('1','true')
+    return matched
+
+
 def validate_managed(spec):
     if not isinstance(spec, dict) or spec.get('kind') not in ('managed_feature', 'managed_rule', 'managed_vpn', 'managed_scoped', 'managed_lifecycle'):
         raise ValueError('managed kind')
@@ -570,7 +621,7 @@ def validate_managed(spec):
             if not isinstance(days,list) or not 1<=len(days)<=7 or any(type(d) is not int or not 0<=d<=6 for d in days) or len(set(days))!=len(days):raise ValueError('weekdays')
             if not isinstance(schedule['timezone'],str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}',schedule['timezone']):raise ValueError('timezone')
         if spec['rule_type']=='dns_override':
-            ipaddress.ip_address(spec['address'])
+            spec['address']=canonical_rule_ip(spec['address'])
         elif 'address' in spec:raise ValueError('address only for DNS override')
         target = spec['target']
         if spec['rule_type'] == 'internet' and target != 'internet':
@@ -580,9 +631,13 @@ def validate_managed(spec):
         if spec['rule_type'] == 'app' and not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',target):
             raise ValueError('app identifier')
         if spec['rule_type'] == 'ip':
-            ipaddress.ip_address(target)
+            spec['target']=canonical_rule_ip(target)
         if spec['rule_type'] in ('dns','dns_override') and (len(target)>253 or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?',part) for part in target.split('.'))):
             raise ValueError('domain')
+        if spec['rule_type'] in ('dns','dns_override'):
+            spec['target']=target.lower()
+        if 'schedule' in spec:
+            spec['schedule']['days']=sorted(spec['schedule']['days'])
     return spec
 
 
@@ -751,7 +806,7 @@ def managed_state(spec, context=None):
             field=selected[0] if selected else None
         else:
             # Conservative duplicate rejection, including disabled/scheduled rules.
-            present=any(row[1]==value['type'] and row[2]==value['target'] for row in rows)
+            present=any(rule_identity(row[1],row[2])==rule_identity(value['type'],value['target']) for row in rows)
             field=None
         data={'rows':rows,'field':field,'present':present}
     else:
@@ -766,7 +821,9 @@ def managed_state(spec, context=None):
                 raise Unsupported('VPN safety/DNS settings differ; explicit changes are not supported')
             data['profile_safety_fingerprints']=[old_hash,new_hash]
     fingerprint=hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-    return {'fingerprint':fingerprint,'present':data['present'],'field':data['field']}
+    result={'fingerprint':fingerprint,'present':data['present'],'field':data['field']}
+    if spec['kind']=='managed_rule':result['known_policy_ids']=[row[0] for row in rows]
+    return result
 
 
 def managed_lifecycle_state(spec):
@@ -796,7 +853,7 @@ def managed_lifecycle_state(spec):
             raise Unsupported('OpenVPN unit must be disabled and match observed connection state')
     data={'connected':connected,'settings_hash':settings_hash,'safety':safety,'unit':unit}
     return {'fingerprint':hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
-            'configuration_fingerprint':settings_hash,'present':connected==(spec['desired']=='connect'),'field':{'observed_connected':connected},
+            'configuration_fingerprint':settings_hash,'present':spec['desired']=='connect' and connected,'field':{'observed_connected':connected,'administrative_intent':'unknown'},
             'rollback':'not_supported; inverse requires a separately approved preview',
             'scope':'profile-wide; all routed devices may be affected'}
 
@@ -812,9 +869,9 @@ def managed_lifecycle(args):
         management_request('cmd','startVpnClient' if spec['desired']=='connect' else 'stopVpnClient','0.0.0.0',
                            {'type':spec['vpn_type'],'profileId':spec['profile']},lifecycle=True)
         after=managed_lifecycle_state(spec)
-        verified=after['present'] and after['configuration_fingerprint']==state['configuration_fingerprint']
+        verified=after['field']['observed_connected']==(spec['desired']=='connect') and after['configuration_fingerprint']==state['configuration_fingerprint']
         return {'outcome':'applied' if verified else 'uncertain','state':after,
-                'observed_lifecycle_verified':verified,'effective_device_path':'unverified',
+                'observed_lifecycle_verified':verified,'management_operation_acknowledged':spec['desired'],'administrative_intent':'requested; asynchronous listeners unverified','effective_device_path':'unverified',
                 'enforcement':'unverified_async','rollback':'not_supported',
                 'note':'Cached link state and interface/service observations only. No claim of peer reachability, Internet access or device routing. Setup/start/stop can affect all routed devices and background reconnect state.'}
     except Exception:
@@ -856,8 +913,16 @@ def managed_write(args):
                 if state['present']:
                     return {'outcome':'stale','changed':False}
                 value=managed_rule_value(spec)
-                pid=management_request('cmd','policy:create','0.0.0.0',value,True)
+                # Upstream create can reactivate a duplicate disabled rule. Creating disabled
+                # first prevents that behavior even if a duplicate races the snapshot.
+                pid=management_request('cmd','policy:create','0.0.0.0',{**value,'disabled':'1'},True)
                 context={'pid':pid,'before':None}
+                if pid in state['known_policy_ids']:
+                    raise Unsupported('creation returned pre-existing ID')
+                created=managed_state(spec,context)
+                if not managed_rule_matches(created['field'],value,spec,True):
+                    raise Unsupported('new disabled rule did not match approved specification')
+                management_request('cmd','policy:enable','0.0.0.0',{'policyID':pid})
             else:
                 if not context or not state['present']:
                     return {'outcome':'stale','changed':False}
@@ -881,14 +946,7 @@ def managed_write(args):
         if spec['kind']=='managed_rule':
             verified=after['present'] if mode=='apply' else not after['present']
             if mode=='apply' and verified:
-                row=after['field']; desired=managed_rule_value(spec)
-                verified=row[1:5]==[desired['type'],desired['target'],desired['action'],'outbound'] and (desired['type']=='mac' or json.loads(row[5])==[spec['device']]) and row[6] in (False,'0',None,'') and row[8] in (False,None,'')
-                if 'schedule' in spec:
-                    verified=verified and row[7]==desired['cronTime'] and str(row[9])==str(desired['duration'])
-                else:
-                    verified=verified and row[7] in (False,None,'')
-                if spec['rule_type']=='dns_override':
-                    verified=verified and row[10]==desired['resolver'] and row[11] in ('0','false') and row[12] in ('1','true')
+                verified=managed_rule_matches(after['field'],managed_rule_value(spec),spec,False)
         else:
             verified=after['field']==value
         return {'outcome':('applied' if mode=='apply' else 'rolled_back') if verified else 'uncertain',
@@ -896,7 +954,7 @@ def managed_write(args):
                 'enforcement':'unverified_async','effective_device_path':'unverified',
                 'note':'Management acknowledgment and selected stored state only. Enforcement, DNS behavior and kill-switch behavior require independent tests; existing global/group/network rules still apply.'}
     except Exception:
-        return {'outcome':'uncertain','reason':'Management request or selected verification failed; inspect before any new attempt.'}
+        return {'outcome':'uncertain','context':context,'reason':'Management request or selected verification failed; a new rule may remain disabled. Inspect before any new attempt.'}
 
 
 def dispatch(op, args):

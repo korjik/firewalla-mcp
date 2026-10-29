@@ -41,3 +41,5 @@ After separate approval, on one selected appliance: confirm table 42420 is absen
 ## Testing
 
 Mock tests exercise write-disabled behavior, allowlists, argument injection, missing/mismatched/expired/symlink approvals, audit failure, concurrent duplicate calls, stale fingerprints, uncertainty, one-time replay and independent rollback approval. `tests/kernel_smoke.py` exercises actual route/filter/DNAT addition, stale rejection and removal in a disposable Docker network namespace with no network interfaces beyond loopback and no router credentials. Appliance writes remain untested.
+
+Route snapshots request numeric iproute2 output (`-N`) so custom table aliases cannot hide conflicts. Host destinations emitted without `/32` and `default` destinations are normalized to CIDR before conflict checks, fingerprints and verification. Unknown table/destination schemas fail closed. The isolated kernel test covers `/24`, `/32`, default routes and a custom named table, including pre-existing host conflicts and verified rollback.

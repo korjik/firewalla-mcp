@@ -31,8 +31,11 @@ def appliance(monkeypatch):
         if item=='policy':
             key=next(iter(value));state['vpn' if key=='vpnClient' else 'feature']=copy.deepcopy(value[key])
         elif item=='policy:create':
-            state['rules'].append(['123',value['type'],value['target'],value['action'],value['direction'],json.dumps(value.get('scope',[])),'0',value.get('cronTime',False),False,str(value.get('duration','')),value.get('resolver',False),str(value.get('domainExactMatch','')).lower(),str(value.get('ipOnly','')).lower()])
+            state['rules'].append(['123',value['type'],value['target'],value['action'],value['direction'],json.dumps(value.get('scope',[])),value.get('disabled','0'),value.get('cronTime',False),False,str(value.get('duration','')),value.get('resolver',False),str(value.get('domainExactMatch','')).lower(),str(value.get('ipOnly','')).lower()])
             return '123'
+        elif item=='policy:enable':
+            assert value=={'policyID':'123'}
+            state['rules'][0][6]='0'
         elif item=='policy:delete':
             assert value=={'policyID':'123'}
             state['rules']=[]
@@ -127,7 +130,7 @@ def test_rule_stale_rollback(appliance):
     result=apply(RULE,preview(RULE))
     appliance['rules'][0][6]='1'
     assert apply(RULE,result['state'],'rollback',result['context'])['outcome']=='stale'
-    assert len(appliance['requests'])==1
+    assert len(appliance['requests'])==2
 
 
 def test_uncertain_not_success(appliance,monkeypatch):

@@ -146,3 +146,36 @@ async def test_concurrent_apply_only_once(manager):
     manager.transport.run.return_value={'status':'ok','data':{'outcome':'applied','state':{'fingerprint':'b'*64,'present':True}}}
     await asyncio.gather(manager.apply(plan['plan_id']),manager.apply(plan['plan_id']))
     assert manager.transport.run.await_count==2 # preview plus one apply
+
+@pytest.mark.parametrize('destination,raw',[
+    ('192.0.2.254/32','192.0.2.254'),('192.0.2.254/32','192.0.2.254/32'),
+    ('0.0.0.0/0','default'),('0.0.0.0/0','0.0.0.0/0'),('192.0.2.0/24','192.0.2.0/24')])
+@pytest.mark.parametrize('table',[42420,'42420'])
+def test_route_destination_and_table_normalization(monkeypatch,destination,raw,table):
+    spec={**SPEC,'destination':destination}
+    def run(argv):
+        assert argv==['ip','-4','-N','-j','route','show','table','all']
+        return json.dumps([{'table':table,'dst':raw,'type':'blackhole'}])
+    monkeypatch.setattr(remote,'run',run)
+    assert remote.write_state(spec)['present']
+
+
+def test_equivalent_route_forms_have_same_fingerprint(monkeypatch):
+    spec={**SPEC,'destination':'192.0.2.254/32'}
+    monkeypatch.setattr(remote,'run',lambda a:json.dumps([{'table':'42420','dst':'192.0.2.254'}]))
+    before=remote.write_state(spec)
+    monkeypatch.setattr(remote,'run',lambda a:json.dumps([{'table':42420,'dst':'192.0.2.254/32'}]))
+    assert remote.write_state(spec)==before
+
+
+@pytest.mark.parametrize('row',[{'table':'custom_name','dst':'192.0.2.254'},{'table':True,'dst':'192.0.2.254'},{'table':42420},{'table':42420,'dst':'garbage'},'garbage'])
+def test_unknown_route_schema_not_silently_absent(monkeypatch,row):
+    monkeypatch.setattr(remote,'run',lambda a:json.dumps([row]))
+    with pytest.raises((remote.Unsupported,ValueError)):
+        remote.write_state({**SPEC,'destination':'192.0.2.254/32'})
+
+
+def test_builtin_table_names_do_not_hide_custom_numeric_route(monkeypatch):
+    rows=[{'table':'main','dst':'default'},{'table':'local','dst':'127.0.0.1'},{'table':'default','dst':'default'},{'dst':'198.51.100.0/24'},{'table':42420,'dst':'192.0.2.254'}]
+    monkeypatch.setattr(remote,'run',lambda a:json.dumps(rows))
+    assert remote.write_state({**SPEC,'destination':'192.0.2.254/32'})['present']
