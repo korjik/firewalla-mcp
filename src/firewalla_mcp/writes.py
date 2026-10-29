@@ -45,6 +45,13 @@ class WriteManager:
             validate_managed(spec)
             if site.management_revision != MANAGEMENT_REVISION:
                 raise ValueError("Explicit reviewed management revision required")
+            if kind == "managed_scoped":
+                from .remote import managed_target
+                if managed_target(spec) not in site.managed_scopes:raise ValueError("Scope outside managed allowlist")
+                return site
+            if kind == "managed_lifecycle":
+                if spec["profile"] not in site.managed_vpn_profiles:raise ValueError("VPN profile outside managed allowlist")
+                return site
             if spec["device"] not in [v.upper() for v in site.managed_devices]:
                 raise ValueError("Device outside managed allowlist")
             if kind == "managed_vpn" and any(spec[k] not in site.managed_vpn_profiles for k in ("expected_profile","destination_profile")):
@@ -100,13 +107,13 @@ class WriteManager:
             raise ValueError("Plan capacity reached")
         plan_id=secrets.token_hex(16)
         plan={"plan_id":plan_id,"box":box,"spec":spec,"expected":state["fingerprint"],
-              "mode":mode,"expires_at":now+600,"scope":"persistent_managed" if spec["kind"].startswith("managed_") else "temporary_kernel_only"}
+              "mode":mode,"expires_at":now+600,"scope":"vpn_runtime_lifecycle" if spec["kind"]=="managed_lifecycle" else "persistent_managed" if spec["kind"].startswith("managed_") else "temporary_kernel_only"}
         if context is not None:
             plan["context"]=context
         plan["digest"]=digest(plan)
         plan["status"]="pending"
         self.plans[plan_id]=plan
-        return {**plan,"approval_file":str(Path(self.config.approval_directory)/(plan_id+".json")),
+        return {**plan,"rollback":state.get("rollback","separate approved rollback preview"),"impact":state.get("scope","selected target only; inherited effects may apply"),"approval_file":str(Path(self.config.approval_directory)/(plan_id+".json")),
                 "approval_document":{"plan_id":plan_id,"digest":plan["digest"],"expires_at":plan["expires_at"],"approved":True},
                 "diff":{"operation":"apply" if mode=="apply" else "restore_exact_prior_state","object":spec,"before":state.get("field")},
                 "warning":"Review out of band. Kernel changes may be overwritten. Managed state acknowledgment does not prove asynchronous enforcement. No automatic approval or retry. Concurrent external writers cannot be made atomic."}
@@ -182,6 +189,8 @@ class WriteManager:
         if plan_id not in self.plans:
             raise ValueError("Unknown plan")
         plan=self.plans[plan_id]
+        if plan["spec"]["kind"]=="managed_lifecycle":
+            raise ValueError("Lifecycle changes have no exact rollback; preview a separate compensating operation after inspection")
         if plan["status"]!="applied" or plan["mode"]!="apply":
             raise ValueError("No verified applied change to roll back")
         if plan["expires_at"]<=time.time():

@@ -10,7 +10,7 @@ async def test_real_stdio_protocol(tmp_path):
     async with stdio_client(params) as (read,write):
         async with ClientSession(read,write) as session:
             await session.initialize()
-            assert len((await session.list_tools()).tools)==42
+            assert len((await session.list_tools()).tools)==46
             result=await session.call_tool("list_boxes",{})
             assert not result.isError
             result=await session.call_tool("tcp_probe",{"box_name":"bad", "address":";id", "port":0})

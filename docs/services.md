@@ -1,6 +1,6 @@
 # DNS, NTP and RADIUS service coverage
 
-`service_feature_status` reads only allowlisted metadata through SSH. `stage_service_change` returns a **non-executable scope proposal**, not an `apply_change` token. Device-scoped DoH/Unbound overrides now have experimental persistent previews in [managed writes](managed-writes.md). Provider/global/network configuration, NTP and RADIUS changes remain unsupported. Nothing has been enabled or changed on the appliances.
+`service_feature_status` reads only allowlisted metadata through SSH. `stage_service_change` returns a **non-executable scope proposal**, not an `apply_change` token. Device-scoped DoH/Unbound overrides now have experimental persistent previews in [managed writes](managed-writes.md). Group/network feature overrides, network NTP interception, and new device DNS answer rules now have separate executable previews. Provider/global configuration and RADIUS changes remain unsupported; existing arbitrary DNS override updates/listing are not implemented. Nothing has been enabled or changed on the appliances.
 
 | Service | Implemented read | Unsupported / not inferred |
 | --- | --- | --- |

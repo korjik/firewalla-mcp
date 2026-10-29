@@ -294,7 +294,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False):
         return {"status":"unsupported_write","executable":False,"current":current,
                 "proposal":{"mac":mac,"from":expected_profile,"to":destination_profile,"preserve":["strict VPN/kill switch","DNS behavior","all other profile and device policy fields"]},
                 "required_validation":["destination profile exists and is compatible","secret-free strict/DNS settings fingerprint","supported persistent management path","effective device routing and return path","verified rollback to original profile"],
-                "reason":"Profile catalog read approval and management/effective-path validation are outstanding. VPN profile import, connect/disconnect and group switching remain unsupported; no credentials accepted by this tool."}
+                "reason":"Profile catalog read approval and management/effective-path validation are outstanding. VPN profile import and group switching remain unsupported; existing-profile lifecycle has a separate executable preview; no credentials accepted by this tool."}
 
     @mcp.tool(annotations=READ)
     async def service_feature_status(box_name: Name, feature: Literal["all","doh","unbound","ntp","radius","custom_dns"] = "all") -> dict:
@@ -325,9 +325,49 @@ def build_server(config: Config, transport=None, readonly_catalog=False):
     def write_capabilities() -> dict:
         """Describe configured write gates and unsupported persistent management paths."""
         return {"enabled": config.writes_enabled,
-                "implemented": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions", "revision-pinned persistent device tri-state controls, outbound block rules and existing-profile device VPN switches"],
+                "implemented": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions", "revision-pinned device/group/network tri-state controls, scheduled app/category blocks, DNS answer rules, device VPN switches and profile lifecycle"],
                 "approval": "Operator-created one-time approval file bound to preview digest; no MCP approval tool",
-                "unsupported": ["persistent Firewalla routes/port forwards", "group/global policies, schedules, rule updates", "VPN profile import/connect/disconnect", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
+                "unsupported": ["persistent Firewalla routes/port forwards", "global policies, arbitrary existing rule updates, user time quotas", "VPN profile import", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
+
+    @mcp.tool(annotations=READ)
+    async def preview_scheduled_block_rule(box_name: Name,device: Mac,
+            rule_type: Literal["category","app"],target: str,hour: int,minute: int,
+            days: list[int],duration_seconds: int,expected_timezone: str) -> dict:
+        """Preview recurring device category/app block in router's verified configured timezone.
+        days: unique 0=Sunday through 6=Saturday; duration 60..79200 seconds, no raw cron.
+        DST follows Firewalla's scheduler. Rollback deletes only the created scheduled rule.
+        """
+        return await writes.preview(box_name,dict(kind="managed_rule",device=device.upper(),rule_type=rule_type,target=target,
+            schedule=dict(hour=hour,minute=minute,days=days,duration=duration_seconds,timezone=expected_timezone)))
+
+    @mcp.tool(annotations=READ)
+    async def preview_dns_override(box_name: Name,device: Mac,domain: str,address: str) -> dict:
+        """Preview new persistent domain-and-subdomain DNS address rule for one device.
+        Literal IPv4/IPv6 answer, IP-only response behavior. Not an upstream resolver setting.
+        No existing override replacement; approved rollback deletes only this created rule.
+        """
+        return await writes.preview(box_name,dict(kind="managed_rule",device=device.upper(),rule_type="dns_override",target=domain,address=address))
+
+    @mcp.tool(annotations=READ)
+    async def preview_scoped_service_control(box_name: Name,scope: Literal["group","network"],target: str,
+            feature: Literal["adblock","safeSearch","unbound","doh","ntp_redirect"],
+            desired: Literal["enable","disable","inherit"]) -> dict:
+        """Preview a persistent group/network tri-state override with exact prior-value rollback.
+        Target is numeric group ID or canonical network UUID, explicitly allowlisted in config.
+        NTP only supports networks and requires already-enabled healthy NTP; no daemon/clock changes.
+        Inherited/effective behavior remains unverified. Existing explicit recognized value required.
+        """
+        return await writes.preview(box_name,dict(kind="managed_scoped",scope=scope,target=target,feature=feature,desired=desired))
+
+    @mcp.tool(annotations=READ)
+    async def preview_vpn_lifecycle(box_name: Name,profile: Name,vpn_type: Literal["openvpn","wireguard"],
+            desired: Literal["connect","disconnect"]) -> dict:
+        """Preview profile-wide management start/stop for one existing allowlisted VPN.
+        Requires consistent cached/interface state; OpenVPN unit must already be disabled.
+        May affect every device using profile; no exact rollback. An inverse is a new approved change.
+        Management may take 80 seconds; unknown outcomes never retry automatically.
+        """
+        return await writes.preview(box_name,dict(kind="managed_lifecycle",profile=profile,vpn_type=vpn_type,desired=desired))
 
     @mcp.tool(annotations=READ)
     async def preview_managed_device_control(box_name: Name, device: Mac,
@@ -406,7 +446,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False):
         return await writes.rollback_preview(plan_id)
 
     if readonly_catalog:
-        for name in ("apply_change","preview_route_change","preview_firewall_rule","preview_port_forward","preview_rollback","preview_managed_device_control","preview_managed_block_rule","preview_managed_vpn_switch"):
+        for name in ("apply_change","preview_route_change","preview_firewall_rule","preview_port_forward","preview_rollback","preview_managed_device_control","preview_managed_block_rule","preview_managed_vpn_switch","preview_scheduled_block_rule","preview_dns_override","preview_scoped_service_control","preview_vpn_lifecycle"):
             mcp.remove_tool(name)
     return mcp
 

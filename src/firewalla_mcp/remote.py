@@ -528,8 +528,19 @@ MANAGEMENT_REVISION = '4b4d9fecbd9fd56613ffba91a7c88b26f1b67396'
 
 
 def validate_managed(spec):
-    if not isinstance(spec, dict) or spec.get('kind') not in ('managed_feature', 'managed_rule', 'managed_vpn'):
+    if not isinstance(spec, dict) or spec.get('kind') not in ('managed_feature', 'managed_rule', 'managed_vpn', 'managed_scoped', 'managed_lifecycle'):
         raise ValueError('managed kind')
+    if spec['kind']=='managed_lifecycle':
+        if set(spec)!={'kind','profile','vpn_type','desired'} or spec['vpn_type'] not in ('openvpn','wireguard') or spec['desired'] not in ('connect','disconnect') or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,10}',spec['profile']):
+            raise ValueError('lifecycle arguments')
+        return spec
+    if spec['kind']=='managed_scoped':
+        if set(spec)!={'kind','scope','target','feature','desired'} or spec['scope'] not in ('group','network') or spec['feature'] not in ('adblock','safeSearch','unbound','doh','ntp_redirect') or spec['desired'] not in ('enable','disable','inherit'):
+            raise ValueError('scoped arguments')
+        pattern=r'[0-9]{1,20}' if spec['scope']=='group' else r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
+        if not re.fullmatch(pattern,spec['target']) or (spec['feature']=='ntp_redirect' and spec['scope']!='network'):
+            raise ValueError('scoped target')
+        return spec
     mac = spec.get('device', '')
     if not isinstance(mac, str) or not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}', mac):
         raise ValueError('canonical device MAC required')
@@ -546,8 +557,21 @@ def validate_managed(spec):
         if spec['expected_profile'] == spec['destination_profile']:
             raise ValueError('same profile')
     else:
-        if set(spec) != {'kind','device','rule_type','target'} or spec['rule_type'] not in ('internet','category','app','ip','dns'):
+        if set(spec)-{'schedule','address'} != {'kind','device','rule_type','target'} or spec['rule_type'] not in ('internet','category','app','ip','dns','dns_override'):
             raise ValueError('rule arguments')
+        if 'schedule' in spec:
+            schedule=spec['schedule']
+            if spec['rule_type'] not in ('category','app') or not isinstance(schedule,dict) or set(schedule)!={'hour','minute','days','duration','timezone'}:
+                raise ValueError('schedule shape')
+            for key,maximum in (('hour',23),('minute',59)):
+                if type(schedule[key]) is not int or not 0<=schedule[key]<=maximum:raise ValueError('schedule time')
+            if type(schedule['duration']) is not int or not 60<=schedule['duration']<=79200:raise ValueError('duration')
+            days=schedule['days']
+            if not isinstance(days,list) or not 1<=len(days)<=7 or any(type(d) is not int or not 0<=d<=6 for d in days) or len(set(days))!=len(days):raise ValueError('weekdays')
+            if not isinstance(schedule['timezone'],str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}',schedule['timezone']):raise ValueError('timezone')
+        if spec['rule_type']=='dns_override':
+            ipaddress.ip_address(spec['address'])
+        elif 'address' in spec:raise ValueError('address only for DNS override')
         target = spec['target']
         if spec['rule_type'] == 'internet' and target != 'internet':
             raise ValueError('internet target')
@@ -557,17 +581,17 @@ def validate_managed(spec):
             raise ValueError('app identifier')
         if spec['rule_type'] == 'ip':
             ipaddress.ip_address(target)
-        if spec['rule_type'] == 'dns' and (len(target)>253 or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?',part) for part in target.split('.'))):
+        if spec['rule_type'] in ('dns','dns_override') and (len(target)>253 or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?',part) for part in target.split('.'))):
             raise ValueError('domain')
     return spec
 
 
-def management_request(command, item, target, value, want_pid=False):
+def management_request(command, item, target, value, want_pid=False, lifecycle=False):
     # Fixed loopback endpoint, no proxy, redirects, cookies, or arbitrary request tool.
     # set policy returns the WHOLE target policy: never read that body.
     import http.client
     import urllib.parse
-    connection = http.client.HTTPConnection('127.0.0.1',8834,timeout=3)
+    connection = http.client.HTTPConnection('127.0.0.1',8834,timeout=80 if lifecycle else 3)
     try:
         query = urllib.parse.urlencode({'command':command,'item':item,'target':target})
         body = json.dumps(value,separators=(',',':'))
@@ -613,12 +637,32 @@ def managed_rule_value(spec):
         if catalog['truncated'] or len(matches)!=1:
             raise Unsupported('app ACL not declared')
         target=matches[0]['ordinary_block_target']
-    result={'type':'mac' if kind=='internet' else 'category' if kind=='app' else kind,
+    result={'type':'mac' if kind=='internet' else 'category' if kind=='app' else 'dns' if kind=='dns_override' else kind,
             'target':spec['device'] if kind=='internet' else target,
             'action':'block','direction':'outbound'}
     if kind!='internet':
         result['scope']=[spec['device']]
+    if kind=='dns_override':
+        result.update(action='address',resolver=spec['address'],domainExactMatch=False,ipOnly=True)
+    if 'schedule' in spec:
+        schedule=spec['schedule']
+        timezone=run(['redis-cli','--raw','HGET','sys:config','timezone']).strip() or 'UTC'
+        if timezone!=schedule['timezone']:raise Unsupported('router timezone differs')
+        result['cronTime']=f"{schedule['minute']} {schedule['hour']} * * {','.join(str(v) for v in sorted(schedule['days']))}"
+        result['duration']=schedule['duration']
     return result
+
+
+def managed_target(spec):
+    if spec['kind']=='managed_scoped':
+        return ('tag:' if spec['scope']=='group' else 'network:')+spec['target']
+    return spec['device']
+
+
+def managed_policy_key(spec):
+    if spec['kind']=='managed_scoped':
+        return 'policy:'+('tag:' if spec['scope']=='group' else 'network:')+spec['target']
+    return 'policy:mac:'+spec['device']
 
 
 def managed_field(spec):
@@ -626,7 +670,7 @@ def managed_field(spec):
 
 
 def managed_field_read(spec):
-    raw=run(['redis-cli','--raw','HGET','policy:mac:'+spec['device'],managed_field(spec)]).strip()
+    raw=run(['redis-cli','--raw','HGET',managed_policy_key(spec),managed_field(spec)]).strip()
     # Missing policies cannot be exactly restored through set; fail closed.
     if not raw or len(raw)>2048:
         raise Unsupported('existing explicit policy required for exact rollback')
@@ -653,13 +697,13 @@ def managed_rule_snapshot():
     if not ids:
         return []
     # One Redis Lua read, constrained to explicit public policy fields, no mutation.
-    script="local r={} for _,k in ipairs(KEYS) do local row=redis.call('HMGET',k,'type','target','action','direction','scope','disabled','cronTime','expire'); table.insert(row,redis.sha1hex(cjson.encode(redis.call('HGETALL',k)))); table.insert(r,row) end return cjson.encode(r)"
+    script="local r={} local total=0 for _,k in ipairs(KEYS) do if redis.call('HLEN',k)>64 then return redis.error_reply('policy size limit') end for _,f in ipairs(redis.call('HKEYS',k)) do local n=redis.call('HSTRLEN',k,f); total=total+n; if n>8192 or total>131072 then return redis.error_reply('policy size limit') end end local row=redis.call('HMGET',k,'type','target','action','direction','scope','disabled','cronTime','expire','duration','resolver','domainExactMatch','ipOnly'); table.insert(row,redis.sha1hex(cjson.encode(redis.call('HGETALL',k)))); table.insert(r,row) end return cjson.encode(r)"
     rows=json.loads(run(['redis-cli','--raw','EVAL',script,str(len(ids))]+['policy:'+p for p in ids]))
     if not isinstance(rows,list) or len(rows)!=len(ids):
         raise Unsupported('rule projection schema')
     projected=[]
     for pid,row in zip(ids,rows):
-        if not isinstance(row,list) or len(row)!=9:
+        if not isinstance(row,list) or len(row)!=13:
             raise Unsupported('rule fields')
         projected.append([pid]+row)
     return projected
@@ -670,7 +714,7 @@ def managed_vpn_safety(profile):
     import hashlib
     import stat
     matches=[]
-    for folder,suffix in (('ovpn_profile','.ovpn'),('wg_profile','.conf')):
+    for folder,suffix in (('ovpn_profile','.ovpn'),('wg_profile','.json')):
         base='/home/pi/.firewalla/run/'+folder+'/'+profile
         if os.path.isfile(base+suffix):
             matches.append(base)
@@ -725,14 +769,77 @@ def managed_state(spec, context=None):
     return {'fingerprint':fingerprint,'present':data['present'],'field':data['field']}
 
 
+def managed_lifecycle_state(spec):
+    import hashlib
+    profile=spec['profile']
+    # Validate existing profile metadata locally; no raw credential-bearing profile query.
+    safety,settings_hash=managed_vpn_safety(profile)
+    folder='ovpn_profile' if spec['vpn_type']=='openvpn' else 'wg_profile'
+    suffix='.ovpn' if spec['vpn_type']=='openvpn' else '.json'
+    if not os.path.isfile('/home/pi/.firewalla/run/'+folder+'/'+profile+suffix):
+        raise Unsupported('profile type mismatch')
+    cached=run(['redis-cli','--raw','GET','VC:'+profile+':connState']).strip()
+    if cached not in ('true','false'):
+        raise Unsupported('cached lifecycle state missing')
+    rows=json.loads(run(['ip','-j','link','show']))
+    links=[row for row in rows if row.get('ifname')=='vpn_'+profile]
+    if len(links)>1:raise Unsupported('ambiguous interface')
+    up=bool(links and 'UP' in links[0].get('flags',[]))
+    connected=cached=='true'
+    if connected!=up or (not connected and links):
+        raise Unsupported('transitional or conflicting lifecycle observations')
+    unit=None
+    if spec['vpn_type']=='openvpn':
+        raw=run(['systemctl','show','openvpn_client@'+profile+'.service','--property=ActiveState,UnitFileState'])
+        unit=dict(line.split('=',1) for line in raw.splitlines() if '=' in line)
+        if unit.get('UnitFileState')!='disabled' or unit.get('ActiveState')!=('active' if connected else 'inactive'):
+            raise Unsupported('OpenVPN unit must be disabled and match observed connection state')
+    data={'connected':connected,'settings_hash':settings_hash,'safety':safety,'unit':unit}
+    return {'fingerprint':hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
+            'configuration_fingerprint':settings_hash,'present':connected==(spec['desired']=='connect'),'field':{'observed_connected':connected},
+            'rollback':'not_supported; inverse requires a separately approved preview',
+            'scope':'profile-wide; all routed devices may be affected'}
+
+
+def managed_lifecycle(args):
+    spec=args['spec']
+    if args['mode']=='rollback':raise Unsupported('no exact lifecycle rollback')
+    state=managed_lifecycle_state(spec)
+    if args['mode']=='preview':return state
+    if args.get('expected')!=state['fingerprint'] or state['present']:
+        return {'outcome':'stale','changed':False}
+    try:
+        management_request('cmd','startVpnClient' if spec['desired']=='connect' else 'stopVpnClient','0.0.0.0',
+                           {'type':spec['vpn_type'],'profileId':spec['profile']},lifecycle=True)
+        after=managed_lifecycle_state(spec)
+        verified=after['present'] and after['configuration_fingerprint']==state['configuration_fingerprint']
+        return {'outcome':'applied' if verified else 'uncertain','state':after,
+                'observed_lifecycle_verified':verified,'effective_device_path':'unverified',
+                'enforcement':'unverified_async','rollback':'not_supported',
+                'note':'Cached link state and interface/service observations only. No claim of peer reachability, Internet access or device routing. Setup/start/stop can affect all routed devices and background reconnect state.'}
+    except Exception:
+        return {'outcome':'uncertain','reason':'Lifecycle request or bounded verification failed; operation may continue on appliance. Do not retry automatically.'}
+
+
 def managed_write(args):
     spec=validate_managed(args['spec'])
     mode=args['mode']
     if mode not in ('preview','apply','rollback'):
         raise ValueError('managed mode')
     management_guard(args.get('revision'))
+    if spec['kind']=='managed_lifecycle':
+        return managed_lifecycle(args)
+    if spec['kind']=='managed_scoped':
+        if spec['scope']=='network':
+            exists=run(['redis-cli','--raw','EXISTS','network:uuid:'+spec['target']]).strip()=='1'
+        else:
+            exists=any(run(['redis-cli','--raw','EXISTS',prefix+spec['target']]).strip()=='1' for prefix in ('tag:uid:','deviceTag:uid:','userTag:uid:','ssidTag:uid:'))
+        if not exists:raise Unsupported('scope missing')
+        if spec['feature']=='ntp_redirect':
+            if run(['redis-cli','--raw','HGET','sys:features','ntp_redirect']).strip()!='1' or run(['redis-cli','--raw','GET','sys:ntp:status']).strip()!='1':
+                raise Unsupported('NTP service must already be enabled and healthy')
     # Ensure exact device exists; no IP->MAC ambiguity or accidental global target.
-    if run(['redis-cli','--raw','EXISTS','host:mac:'+spec['device']]).strip()!='1':
+    if spec['kind']!='managed_scoped' and run(['redis-cli','--raw','EXISTS','host:mac:'+spec['device']]).strip()!='1':
         raise Unsupported('device missing')
     context=args.get('context')
     state=managed_state(spec,context)
@@ -769,13 +876,19 @@ def managed_write(args):
                 if not context or 'before' not in context:
                     raise Unsupported('rollback context')
                 value=context['before']
-            management_request('set','policy',spec['device'],{managed_field(spec):value})
+            management_request('set','policy',managed_target(spec),{managed_field(spec):value})
         after=managed_state(spec,context)
         if spec['kind']=='managed_rule':
             verified=after['present'] if mode=='apply' else not after['present']
             if mode=='apply' and verified:
                 row=after['field']; desired=managed_rule_value(spec)
-                verified=row[1:5]==[desired['type'],desired['target'],'block','outbound'] and (desired['type']=='mac' or json.loads(row[5])==[spec['device']]) and row[6] in (False,'0',None,'') and row[7] in (False,None,'') and row[8] in (False,None,'')
+                verified=row[1:5]==[desired['type'],desired['target'],desired['action'],'outbound'] and (desired['type']=='mac' or json.loads(row[5])==[spec['device']]) and row[6] in (False,'0',None,'') and row[8] in (False,None,'')
+                if 'schedule' in spec:
+                    verified=verified and row[7]==desired['cronTime'] and str(row[9])==str(desired['duration'])
+                else:
+                    verified=verified and row[7] in (False,None,'')
+                if spec['rule_type']=='dns_override':
+                    verified=verified and row[10]==desired['resolver'] and row[11] in ('0','false') and row[12] in ('1','true')
         else:
             verified=after['field']==value
         return {'outcome':('applied' if mode=='apply' else 'rolled_back') if verified else 'uncertain',

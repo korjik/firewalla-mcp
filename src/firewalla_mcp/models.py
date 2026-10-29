@@ -19,6 +19,7 @@ class Site(BaseModel):
     allowed_filter_chains: list[Name] = []
     allowed_nat_chains: list[Name] = []
     management_revision: str | None = None
+    managed_scopes: list[str] = []
     managed_devices: list[Mac] = []
     managed_vpn_profiles: list[Name] = []
     vantage_group: Name

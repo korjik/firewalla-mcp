@@ -109,7 +109,7 @@ async def test_transport_timeout_kills(monkeypatch,config):
 
 async def test_catalog(config):
     tools=await build_server(config).list_tools()
-    assert len(tools)==42
+    assert len(tools)==46
     assert all(t.annotations.readOnlyHint for t in tools if t.name != "apply_change")
     assert next(t for t in tools if t.name == "apply_change").annotations.destructiveHint
     assert not any("shell" in t.name for t in tools)

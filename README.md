@@ -87,7 +87,7 @@ CI runs tests, builds the image, and performs the container MCP smoke test. [Sec
 
 ## Complete tool contract
 
-The diagnostic tools below are read-only, but SSH connections can create normal login logs; DNS/TCP tools also generate traffic. All router tools require `box_name`. Write tools are separately cataloged below and disabled by default. Unless stated otherwise, privilege is `pi` without sudo. Remote subprocesses are capped at 5 seconds/128 KiB; the helper is capped at 20 seconds and transport at 25 seconds. Larger results become unsupported. `H` below means the actual helper was tested through an existing SSH connector on two appliances; it does **not** mean the new server's OpenSSH path was live-tested. `M` means mock/protocol coverage only; these adapters are experimental pending an owner-run end-to-end check.
+The diagnostic tools below are read-only, but SSH connections can create normal login logs; DNS/TCP tools also generate traffic. All router tools require `box_name`. Write tools are separately cataloged below and disabled by default. Unless stated otherwise, privilege is `pi` without sudo. Remote subprocesses are capped at 5 seconds/128 KiB; the helper is normally capped at 20 seconds and transport at 25 seconds. Explicit VPN lifecycle operations instead allow 80 seconds for the management request, 110 seconds total helper time and 115 seconds transport time. Larger results become unsupported. `H` below means the actual helper was tested through an existing SSH connector on two appliances; it does **not** mean the new server's OpenSSH path was live-tested. `M` means mock/protocol coverage only; these adapters are experimental pending an owner-run end-to-end check.
 
 | Tool | Additional arguments | Output and bounds | Privilege | Evidence / side effects |
 | --- | --- | --- | --- | --- |
@@ -141,7 +141,7 @@ All mutation execution requires an administrator-enabled gate, per-box table/cha
 
 The base catalog described above has 30 tools: 24 diagnostic tools plus these six write-management tools; seven further inspection/staging tools below bring the current total to 37. Five write-management tools only describe or preview; `apply_change` is the sole mutation boundary. Plan memory is bounded to 128 live entries. Rollback is not automatic, and cannot be promised after a disconnect or unrelated configuration change.
 
-Persistent routes/port-forward configuration, general rule editing, VPN connect/disconnect/profile provisioning, service restarts/reboots/upgrades and arbitrary shell execution remain **unsupported**. Selected persistent device settings, new block rules and existing-profile device VPN switches are implemented separately below. The source management paths are described in `docs/writes.md`; no development endpoint is enabled. This project does not claim the full Firewalla app suite is safely available over SSH.
+Persistent routes/port-forward configuration, general rule editing, VPN profile provisioning, service restarts/reboots/upgrades and arbitrary shell execution remain **unsupported**. Selected persistent device settings, new block rules and existing-profile device VPN switches are implemented separately below. The source management paths are described in `docs/writes.md`; no development endpoint is enabled. This project does not claim the full Firewalla app suite is safely available over SSH.
 
 ## Related project
 
@@ -162,7 +162,7 @@ These adapters were independently implemented after the [related-project and lic
 
 ## Device controls, apps and flow investigation
 
-The following section adds seven tools to the base catalog; the current total including service inspection below is **42 tools**. The following seven extend the catalog above; all seven are read-only, and staged control/VPN proposals are explicitly **not executable write plans**. See [semantics, filters, retention and VPN limitations](docs/device-controls-and-flows.md).
+The following section adds seven tools to the base catalog; the current total including service inspection below is **46 tools**. The following seven extend the catalog above; all seven are read-only, and staged control/VPN proposals are explicitly **not executable write plans**. See [semantics, filters, retention and VPN limitations](docs/device-controls-and-flows.md).
 
 | Tool | Arguments beyond `box_name` | Output / limits | Privilege, effects and evidence |
 | --- | --- | --- | --- |
@@ -178,7 +178,7 @@ Scoped feature `false` means inherit and `null` explicit disable in reviewed Saf
 
 ## Service inspection and proposals
 
-**Current total: 42 tools.** Only `apply_change` can execute a mutation; it remains disabled by default and requires host-side approval. The three `stage_*` tools return non-executable proposals, not supported persistent writes. These two service inspection/proposal tools are complemented by the persistent tools below:
+**Current total: 46 tools.** Only `apply_change` can execute a mutation; it remains disabled by default and requires host-side approval. The three `stage_*` tools return non-executable proposals, not supported persistent writes. These two service inspection/proposal tools are complemented by the persistent tools below:
 
 | Tool | Arguments beyond `box_name` | Output / limits | Privilege, effects and evidence |
 | --- | --- | --- | --- |
@@ -190,17 +190,27 @@ Scoped feature `false` means inherit and `null` explicit disable in reviewed Saf
 
 ## ContextForge / Okta integration
 
-[Secure HTTP and gateway guide](docs/contextforge-okta.md) covers genuine Streamable HTTP at `/mcp`, mandatory file-backed bearer authentication, private bind defaults, Host/Origin checks, TLS/network isolation and ContextForge registration. `compose.http.yaml` is a separate loopback-only example. HTTP defaults to 34 read-only tools; a separate explicitly enabled writer can expose the complete 42-tool catalog. Okta belongs at the gateway authentication/authorization boundary; no MSP integration is added. No live gateway, Okta or NAS deployment is claimed completed.
+[Secure HTTP and gateway guide](docs/contextforge-okta.md) covers genuine Streamable HTTP at `/mcp`, mandatory file-backed bearer authentication, private bind defaults, Host/Origin checks, TLS/network isolation and ContextForge registration. `compose.http.yaml` is a separate loopback-only example. HTTP defaults to 34 read-only tools; a separate explicitly enabled writer can expose the complete 46-tool catalog. Okta belongs at the gateway authentication/authorization boundary; no MSP integration is added. No live gateway, Okta or NAS deployment is claimed completed.
 
 
 ## Persistent Firewalla-managed writes (experimental)
 
-Three additional preview tools produce executable `apply_change` plans. They use Firewalla's **existing** loopback management logic over SSH; they never enable an endpoint or write Redis policy fields directly. They require explicit write enablement, a per-device allowlist, exact reviewed source revision and a clean tracked source tree. All are **contract/mock tested only; no live management write or enforcement test has run**. HTTP read-only mode omits these three tools, retaining 34 tools; full mode exposes 42.
+Seven managed/lifecycle preview tools produce executable `apply_change` plans. They use Firewalla's **existing** loopback management logic over SSH; they never enable an endpoint or write Redis policy fields directly. They require explicit write enablement, per-device/scope/profile allowlists, exact reviewed source revision and a clean tracked source tree. All are **contract/mock tested only; no live management write or enforcement test has run**. HTTP read-only mode omits these seven tools, retaining 34 tools; full mode exposes 46.
 
 | Tool | Arguments (plus `box_name`) | Purpose, scope and limits | Privilege / side effects / verification |
 |---|---|---|---|
 | `preview_managed_device_control` | `device` MAC, `feature`: adblock/safeSearch/unbound/doh, `desired`: enable/disable/inherit | Persistent device override; requires an existing explicit, recognized value. Exact previous value is available for approved rollback. No group/global/provider changes | pi + local Redis + already-running loopback API. Preview reads only; approved apply can change filtering/DNS and trigger normal Firewalla enforcement. Stored state verified, enforcement unverified |
-| `preview_managed_block_rule` | `device` MAC, `rule_type`: internet/category/app/ip/dns, `target` | New persistent outbound block. Category IDs games/social/av/porn/vpn; app IDs require dynamic ACL support. Maximum 128 active policies; possible duplicates rejected. Rollback removes only returned rule ID | Same privileges. Preview includes bounded rule fingerprint; approved apply uses policy:create/delete. Full rule content stays on appliance; selected fields and opaque hashes only. No schedules or arbitrary existing rule editing |
+| `preview_managed_block_rule` | `device` MAC, `rule_type`: internet/category/app/ip/dns, `target` | New persistent outbound block. Category IDs games/social/av/porn/vpn; app IDs require dynamic ACL support. Maximum 128 active policies; possible duplicates rejected. Rollback removes only returned rule ID | Same privileges. Preview includes bounded rule fingerprint; approved apply uses policy:create/delete. Full rule content stays on appliance; selected fields and opaque hashes only. Schedules use a separate preview; no arbitrary existing rule editing |
 | `preview_managed_vpn_switch` | `device` MAC, `expected_profile`, `destination_profile` | Switch explicit enabled device policy between existing allowlisted OpenVPN/WireGuard profiles. Safety/DNS flags must match; settings never modified. Exact prior policy rollback | Same privileges plus selected local profile settings inspection. No VPN config/key files opened, profile API queried, or credentials returned. Stored policy verified; effective route, DNS and kill-switch behavior remain unverified |
 
 See [persistent adapter enablement, compatibility, evidence and remaining gaps](docs/managed-writes.md). A stored-state acknowledgment is not evidence that network enforcement has completed. Existing inherited/global blocks continue to apply. The `stage_*` tools remain non-executable exploration tools and are not substitutes for these previews.
+
+
+| Additional executable preview | Arguments (plus `box_name`) | Behavior / limits / side effects | Validation |
+|---|---|---|---|
+| `preview_scheduled_block_rule` | device MAC, category/app target, hour, minute, days (0 Sunday–6 Saturday), duration_seconds, expected_timezone | Creates a recurring device block using typed weekly fields; 60–79200 second duration, verified router timezone, no raw cron input. Approved rollback removes only created ID. Network blocking follows appliance scheduler/DST | Contract tests; pi + Redis + existing management API; no live schedule/enforcement test |
+| `preview_dns_override` | device MAC, domain, literal IPv4/IPv6 address | Creates domain **and subdomain** DNS answer rule, IP-only answers; may cause normal Firewalla DNS reload. No existing rule replacement. Approved rollback removes only created ID | Contract tests; pi + Redis + existing API; no live DNS-answer test |
+| `preview_scoped_service_control` | group/network scope, numeric group ID or network UUID, feature, enable/disable/inherit | Exact prior-value restore for Ad Block/Safe Search/DoH/Unbound; NTP only on networks with already-enabled healthy NTP. Explicit scope allowlist required. No global/provider settings or clock changes | Contract tests; pi + Redis + existing API; inherited/effective behavior unverified |
+| `preview_vpn_lifecycle` | profile ID, openvpn/wireguard, connect/disconnect | Profile-wide start/stop, potentially affecting every routed device. Requires consistent cached link/interface observations and existing settings. OpenVPN unit must already be disabled; IDs limited to 11 characters for Linux interface names. No exact rollback; inverse requires a separate approved preview | Contract tests; pi + metadata + existing API; runtime connectivity/device path unverified; uncertain requests may continue remotely |
+
+[Consolidated requested-feature checklist](docs/requested-coverage.md) records implemented versus partial, blocked and unverified work. This is not full Firewalla app parity.

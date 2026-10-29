@@ -31,7 +31,7 @@ def appliance(monkeypatch):
         if item=='policy':
             key=next(iter(value));state['vpn' if key=='vpnClient' else 'feature']=copy.deepcopy(value[key])
         elif item=='policy:create':
-            state['rules'].append(['123',value['type'],value['target'],value['action'],value['direction'],json.dumps(value.get('scope',[])),'0',False,False])
+            state['rules'].append(['123',value['type'],value['target'],value['action'],value['direction'],json.dumps(value.get('scope',[])),'0',value.get('cronTime',False),False,str(value.get('duration','')),value.get('resolver',False),str(value.get('domainExactMatch','')).lower(),str(value.get('ipOnly','')).lower()])
             return '123'
         elif item=='policy:delete':
             assert value=={'policyID':'123'}
@@ -259,7 +259,7 @@ def test_rule_projection_hashes_other_fields_on_router(monkeypatch):
         assert 'EVAL' in argv
         script=argv[3]
         assert 'redis.sha1hex' in script and "redis.call('HGETALL',k)" in script
-        return json.dumps([['category','av','block','outbound','[]','0',False,False,'opaquehash']])
+        return json.dumps([['category','av','block','outbound','[]','0',False,False,False,False,False,False,'opaquehash']])
     monkeypatch.setattr(remote,'run',run)
     rows=remote.managed_rule_snapshot()
     assert rows[0][-1]=='opaquehash' and rows[0][0]=='123'
