@@ -21,7 +21,7 @@ Status as of 2026-10-29. Two owner-authorized appliances were probed through an 
 | Packet metadata | Not implemented | No capture performed | Explicit opt-in, packet/time cap, zero payload exposure |
 | Temporary kernel writes | Opt-in route/filter/DNAT additions and approved rollback | Approval mocks and isolated kernel tests; no appliance mutation | Persistent managed changes, device/VPN/maintenance writes |
 
-The helper requires Python 3 and `timeout`; adapters probe utility availability and validate schemas on each call. Missing tools or unfamiliar/oversized output remain unsupported. Utility presence alone is not evidence of adapter support. There is no version string allowlist that pretends to validate unknown releases.
+The helper requires Python 3 and `timeout`; adapters probe utility availability and validate schemas on each call. Missing tools or unfamiliar/oversized output remain unsupported. Utility presence alone is not evidence of adapter support. Read adapters validate data shapes. Experimental managed write adapters additionally require an exact reviewed source commit and clean tracked tree; this does not certify runtime enforcement.
 
 ## Source research
 
@@ -29,7 +29,7 @@ Reviewed official [Firewalla source](https://github.com/firewalla/firewalla/tree
 
 - [`extension/portforward/portforward.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/extension/portforward/portforward.js) stores JSON in `extension.portforward.config` with a `maps` array, protocol, dport, toIP, toPort and enabled fields. It also contains scheduling and application logic. Reading a stored entry alone cannot prove its effective kernel behavior.
 - [`net2/Host.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/net2/Host.js) uses `host:mac:` records and VPN policy/profile references. This server reads only the known IPv4 field, not entire device or VPN hashes.
-- [`api/routes/me.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/api/routes/me.js) has development-gated behavior. Source routes do not establish production/beta runtime support. This server never enables or relies on internal HTTP routes.
+- [`api/routes/me.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/api/routes/me.js) has development-gated behavior. Source routes do not establish production/beta runtime support. This server never enables internal HTTP routes. Optional managed writes require the already-running loopback encipher route; development-only routes remain unused.
 
 The MCP integration uses the [official Python SDK](https://github.com/modelcontextprotocol/python-sdk), pinned to the compatible 1.x API through the dependency lock. Upgrading to 2.x requires an explicit migration and protocol tests.
 

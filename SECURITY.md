@@ -1,6 +1,6 @@
 # Security model
 
-Read-only is the default. Optional write tools change temporary kernel state only after host-side operator approval; persistent Firewalla-managed changes are not implemented. DNS and TCP probes generate bounded network traffic. SSH authentication itself can create normal system logs. Never grant a model unrestricted SSH shell access through this server.
+Read-only is the default. Optional write tools change temporary kernel state or selected revision-pinned persistent managed state only after host-side operator approval. See docs/managed-writes.md for the exact supported scope. DNS and TCP probes generate bounded network traffic. SSH authentication itself can create normal system logs. Never grant a model unrestricted SSH shell access through this server.
 
 - The public MCP catalog is explicit and typed. No tool accepts shell commands, Redis keys, paths, executable names, scripts, or arbitrary command flags.
 - SSH hosts are literal IP addresses from administrator-owned configuration. Users select labels only. TCP probes are confined to configured CIDRs. DNS queries are validated labels and may use the configured system resolver.
@@ -15,8 +15,10 @@ Read-only is the default. Optional write tools change temporary kernel state onl
 
 Optional temporary route/filter/DNAT additions and exact approved rollback are described in [write security and approval boundaries](docs/writes.md). They require existing sudo access and can disrupt connectivity. A host-controlled approval file is mandatory; no MCP tool can approve a plan. Snapshot checks are not atomic against external writers.
 
-Not implemented: persistent managed mutations, VPN switching, provider port assignment changes, packet capture, package installation, service restart, scheduled tasks, or internal HTTP API enablement. Packet metadata capture is deferred until an explicit opt-in, bounded, payload-free adapter can be independently validated. Do not substitute raw tcpdump output.
+Not implemented: arbitrary persistent managed mutations, VPN provisioning/group switching, provider port assignment changes, packet capture, package installation, service restart, scheduled tasks, or internal HTTP API enablement. Packet metadata capture is deferred until an explicit opt-in, bounded, payload-free adapter can be independently validated. Do not substitute raw tcpdump output.
 
 Report vulnerabilities privately through the repository owner's GitHub contact before posting operational details. Never include private keys, tokens, router IPs or raw traffic in a public issue.
 
 Per-device flow tools intentionally return selected private traffic metadata to the authorized MCP client: destination IP/domain/port, timestamps, direction and known bytes. They omit URLs/query strings, payloads and arbitrary fields. Treat results as private; never copy live flow data into public fixtures or docs. Control/VPN staging tools cannot produce executable approval tokens. Do not use a full init or VPN-profile management response to extract a small public field: such responses can contain secrets.
+
+Managed policy set responses may contain unrelated sensitive policy fields; their bodies are never read. Rule create responses are projected on-router to the numeric ID only. VPN switching reads bounded settings locally and returns only selected policy references/fingerprints; it never opens VPN config/private-key files or calls the credential-bearing profile API. Live validation of this settings path remains separately approval-gated.

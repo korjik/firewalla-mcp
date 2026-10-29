@@ -20,9 +20,9 @@ Endpoint: `/mcp`. Authenticated process-health endpoint: `/healthz` (does not te
 
 ## Read/write separation
 
-HTTP defaults to a **34-tool read-only catalog**: `apply_change` and the four executable-write preview/rollback tools are removed, and startup rejects `writes_enabled=true`. A caller cannot invoke a removed tool by guessing its name. Non-executable `stage_*` proposals remain read-only and do not grant mutation authority.
+HTTP defaults to a **34-tool read-only catalog**: `apply_change` and the seven executable-write preview/rollback tools are removed, and startup rejects `writes_enabled=true`. A caller cannot invoke a removed tool by guessing its name. Non-executable `stage_*` proposals remain read-only and do not grant mutation authority.
 
-A separately deployed administrative backend can use `--allow-write-catalog` only with `writes_enabled=true`, exact per-box allowlists, mounted approval/audit directories and a **different bearer secret**. It exposes the complete 39-tool catalog. Keep one writer process to preserve in-memory plan state; load balancing/restarting invalidates plans. Gateway RBAC authorization is necessary but does not replace the host-side, single-use operator approval required by `apply_change`.
+A separately deployed administrative backend can use `--allow-write-catalog` only with `writes_enabled=true`, exact per-box allowlists, mounted approval/audit directories and a **different bearer secret**. It exposes the complete 42-tool catalog. Keep one writer process to preserve in-memory plan state; load balancing/restarting invalidates plans. Gateway RBAC authorization is necessary but does not replace the host-side, single-use operator approval required by `apply_change`.
 
 Stdio exposes the full catalog with writes disabled by default. HTTP catalog choice does not widen SSH access or create router credentials. Use distinct dedicated SSH keys for read/admin instances when practical; a `pi` key remains powerful outside this application.
 

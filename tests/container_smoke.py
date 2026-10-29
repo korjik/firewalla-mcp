@@ -14,8 +14,8 @@ async def main():
         async with stdio_client(params) as (read,write):
             async with ClientSession(read,write) as session:
                 await session.initialize()
-                assert len((await session.list_tools()).tools)==39
+                assert len((await session.list_tools()).tools)==42
                 assert not (await session.call_tool("list_boxes",{})).isError
-                print("Docker MCP initialize, 39 tools, list_boxes: PASS")
+                print("Docker MCP initialize, 42 tools, list_boxes: PASS")
 
 if __name__=="__main__": asyncio.run(main())

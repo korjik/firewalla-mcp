@@ -40,6 +40,16 @@ class WriteManager:
             raise ValueError("Unknown box")
         site=self.config.sites[box_name]
         kind=spec["kind"]
+        if kind.startswith("managed_"):
+            from .remote import validate_managed, MANAGEMENT_REVISION
+            validate_managed(spec)
+            if site.management_revision != MANAGEMENT_REVISION:
+                raise ValueError("Explicit reviewed management revision required")
+            if spec["device"] not in [v.upper() for v in site.managed_devices]:
+                raise ValueError("Device outside managed allowlist")
+            if kind == "managed_vpn" and any(spec[k] not in site.managed_vpn_profiles for k in ("expected_profile","destination_profile")):
+                raise ValueError("VPN profile outside managed allowlist")
+            return site
         if kind=="route":
             if type(spec["table"]) is not int or spec["table"] not in site.allowed_route_tables or spec["table"] in (253,254,255):
                 raise ValueError("Route table not permitted; reserved tables are excluded")
@@ -82,7 +92,7 @@ class WriteManager:
         finally:
             os.close(fd)
 
-    def new_plan(self,box,spec,state,mode):
+    def new_plan(self,box,spec,state,mode,context=None):
         # Bound memory and expiry. Only pending plans are pruned; completed entries support rollback.
         now=int(time.time())
         self.plans={k:v for k,v in self.plans.items() if v["expires_at"]>now}
@@ -90,24 +100,34 @@ class WriteManager:
             raise ValueError("Plan capacity reached")
         plan_id=secrets.token_hex(16)
         plan={"plan_id":plan_id,"box":box,"spec":spec,"expected":state["fingerprint"],
-              "mode":mode,"expires_at":now+600,"scope":"temporary_kernel_only"}
+              "mode":mode,"expires_at":now+600,"scope":"persistent_managed" if spec["kind"].startswith("managed_") else "temporary_kernel_only"}
+        if context is not None:
+            plan["context"]=context
         plan["digest"]=digest(plan)
         plan["status"]="pending"
         self.plans[plan_id]=plan
         return {**plan,"approval_file":str(Path(self.config.approval_directory)/(plan_id+".json")),
                 "approval_document":{"plan_id":plan_id,"digest":plan["digest"],"expires_at":plan["expires_at"],"approved":True},
-                "diff":{"operation":"add" if mode=="apply" else "remove_exact_added_object","object":spec},
-                "warning":"Review out of band. Firewalla may overwrite kernel state. No automatic approval or retry. Concurrent external writers cannot be made atomic."}
+                "diff":{"operation":"apply" if mode=="apply" else "restore_exact_prior_state","object":spec,"before":state.get("field")},
+                "warning":"Review out of band. Kernel changes may be overwritten. Managed state acknowledgment does not prove asynchronous enforcement. No automatic approval or retry. Concurrent external writers cannot be made atomic."}
+
+    async def remote_write(self,site,spec,mode,expected=None,context=None):
+        managed=spec["kind"].startswith("managed_")
+        args={"mode":mode,"spec":spec}
+        if expected is not None: args["expected"]=expected
+        if context is not None: args["context"]=context
+        if managed: args["revision"]=site.management_revision
+        return await self.transport.run(site,"managed_write" if managed else "write",args)
 
     async def preview(self,box,spec):
         site=self.validate(box,spec)
         async with self.locks[box]:
-            result=await self.transport.run(site,"write",{"mode":"preview","spec":spec})
+            result=await self.remote_write(site,spec,"preview")
             if result.get("status")!="ok":
                 return result
             state=result["data"]
             if state["present"]:
-                return {"status":"no_change","reason":"Matching route destination or marked rule already exists; no replacement is permitted."}
+                return {"status":"no_change","reason":"Desired state or potentially duplicate rule already exists; no replacement is permitted."}
             return self.new_plan(box,spec,state,"apply")
 
     def consume_approval(self,plan):
@@ -146,7 +166,7 @@ class WriteManager:
             self.consume_approval(plan)
             self.audit(plan_id,"approved_attempt",plan["box"])
             plan["status"]="uncertain" # Cancellation/transport failure never permits automatic retry.
-            result=await self.transport.run(site,"write",{"mode":plan["mode"],"spec":plan["spec"],"expected":plan["expected"]})
+            result=await self.remote_write(site,plan["spec"],plan["mode"],plan["expected"],plan.get("context"))
             plan["result"]=result
             outcome=result.get("data",{}).get("outcome","uncertain")
             plan["status"]=outcome
@@ -168,8 +188,8 @@ class WriteManager:
             raise ValueError("Rollback window expired; inspect manually")
         site=self.validate(plan["box"],plan["spec"])
         async with self.locks[plan["box"]]:
-            current=await self.transport.run(site,"write",{"mode":"preview","spec":plan["spec"]})
+            current=await self.remote_write(site,plan["spec"],"preview",context=plan["result"]["data"].get("context"))
             expected=plan["result"]["data"]["state"]["fingerprint"]
             if current.get("status")!="ok" or current["data"]["fingerprint"]!=expected:
                 return {"status":"stale","reason":"State changed since application. No automatic rollback."}
-            return self.new_plan(plan["box"],plan["spec"],current["data"],"rollback")
+            return self.new_plan(plan["box"],plan["spec"],current["data"],"rollback",plan["result"]["data"].get("context"))

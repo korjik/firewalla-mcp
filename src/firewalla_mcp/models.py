@@ -18,6 +18,9 @@ class Site(BaseModel):
     allowed_route_tables: list[int] = []
     allowed_filter_chains: list[Name] = []
     allowed_nat_chains: list[Name] = []
+    management_revision: str | None = None
+    managed_devices: list[Mac] = []
+    managed_vpn_profiles: list[Name] = []
     vantage_group: Name
 
     @field_validator("host")

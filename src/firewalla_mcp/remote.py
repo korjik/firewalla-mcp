@@ -523,7 +523,272 @@ def service_features(feature):
     return results
 
 
+# Independently implemented protocol adapter; reviewed upstream revision only.
+MANAGEMENT_REVISION = '4b4d9fecbd9fd56613ffba91a7c88b26f1b67396'
+
+
+def validate_managed(spec):
+    if not isinstance(spec, dict) or spec.get('kind') not in ('managed_feature', 'managed_rule', 'managed_vpn'):
+        raise ValueError('managed kind')
+    mac = spec.get('device', '')
+    if not isinstance(mac, str) or not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}', mac):
+        raise ValueError('canonical device MAC required')
+    kind = spec['kind']
+    if kind == 'managed_feature':
+        if set(spec) != {'kind','device','feature','desired'} or spec['feature'] not in ('adblock','safeSearch','unbound','doh') or spec['desired'] not in ('enable','disable','inherit'):
+            raise ValueError('feature arguments')
+    elif kind == 'managed_vpn':
+        if set(spec) != {'kind','device','expected_profile','destination_profile'}:
+            raise ValueError('VPN arguments')
+        for key in ('expected_profile','destination_profile'):
+            if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}',spec[key]):
+                raise ValueError('profile identifier')
+        if spec['expected_profile'] == spec['destination_profile']:
+            raise ValueError('same profile')
+    else:
+        if set(spec) != {'kind','device','rule_type','target'} or spec['rule_type'] not in ('internet','category','app','ip','dns'):
+            raise ValueError('rule arguments')
+        target = spec['target']
+        if spec['rule_type'] == 'internet' and target != 'internet':
+            raise ValueError('internet target')
+        if spec['rule_type'] == 'category' and target not in ('games','social','av','porn','vpn'):
+            raise ValueError('category identifier')
+        if spec['rule_type'] == 'app' and not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',target):
+            raise ValueError('app identifier')
+        if spec['rule_type'] == 'ip':
+            ipaddress.ip_address(target)
+        if spec['rule_type'] == 'dns' and (len(target)>253 or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?',part) for part in target.split('.'))):
+            raise ValueError('domain')
+    return spec
+
+
+def management_request(command, item, target, value, want_pid=False):
+    # Fixed loopback endpoint, no proxy, redirects, cookies, or arbitrary request tool.
+    # set policy returns the WHOLE target policy: never read that body.
+    import http.client
+    import urllib.parse
+    connection = http.client.HTTPConnection('127.0.0.1',8834,timeout=3)
+    try:
+        query = urllib.parse.urlencode({'command':command,'item':item,'target':target})
+        body = json.dumps(value,separators=(',',':'))
+        if len(body)>4096:
+            raise Unsupported('request limit')
+        connection.request('POST','/v1/encipher/simple?'+query,body,{'Content-Type':'application/json'})
+        response = connection.getresponse()
+        if response.status != 200:
+            raise Unsupported('management response rejected')
+        if not want_pid:
+            return None
+        raw = response.read(16385)
+        if len(raw)>16384:
+            raise Unsupported('management response limit')
+        payload = json.loads(raw)
+        if payload.get('code') != 200 or not isinstance(payload.get('data'),dict):
+            raise Unsupported('management response schema')
+        pid = str(payload['data'].get('pid',''))
+        if not re.fullmatch(r'[0-9]{1,20}',pid) or payload['data'].get('updated'):
+            raise Unsupported('unexpected rule response')
+        return pid
+    finally:
+        connection.close()
+
+
+def management_guard(revision):
+    if revision != MANAGEMENT_REVISION:
+        raise Unsupported('unreviewed management revision')
+    root = '/home/pi/firewalla'
+    if run(['git','-C',root,'rev-parse','HEAD']).strip() != revision:
+        raise Unsupported('installed source revision mismatch')
+    if run(['git','-C',root,'status','--porcelain','--untracked-files=no']).strip():
+        raise Unsupported('modified installed source')
+    # Existing endpoint only. Never start a service or enable a development route.
+    management_request('cmd','ping','0.0.0.0',{})
+
+
+def managed_rule_value(spec):
+    kind,target = spec['rule_type'],spec['target']
+    if kind == 'app':
+        catalog = app_catalog({})
+        matches = [v for v in catalog['apps'] if v['id']==target and v['ordinary_block_target']]
+        if catalog['truncated'] or len(matches)!=1:
+            raise Unsupported('app ACL not declared')
+        target=matches[0]['ordinary_block_target']
+    result={'type':'mac' if kind=='internet' else 'category' if kind=='app' else kind,
+            'target':spec['device'] if kind=='internet' else target,
+            'action':'block','direction':'outbound'}
+    if kind!='internet':
+        result['scope']=[spec['device']]
+    return result
+
+
+def managed_field(spec):
+    return 'vpnClient' if spec['kind']=='managed_vpn' else spec['feature']
+
+
+def managed_field_read(spec):
+    raw=run(['redis-cli','--raw','HGET','policy:mac:'+spec['device'],managed_field(spec)]).strip()
+    # Missing policies cannot be exactly restored through set; fail closed.
+    if not raw or len(raw)>2048:
+        raise Unsupported('existing explicit policy required for exact rollback')
+    value=json.loads(raw)
+    if spec['kind']=='managed_vpn':
+        if not isinstance(value,dict) or set(value)!={'state','profileId'} or value['state'] is not True or not isinstance(value['profileId'],str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}',value['profileId']):
+            raise Unsupported('VPN policy must be an explicit enabled profile without unknown fields')
+    else:
+        state=value
+        if spec['feature']!='adblock':
+            if not isinstance(value,dict) or set(value)!={'state'}:
+                raise Unsupported('unknown feature fields')
+            state=value['state']
+        if state is not None and type(state) is not bool:
+            raise Unsupported('tri-state schema')
+    return value
+
+
+def managed_rule_snapshot():
+    # Reject large rule sets, avoid unbounded per-rule reads, and never return raw policies.
+    ids=run(['redis-cli','--raw','ZRANGE','policy_active','0','128']).splitlines()
+    if len(ids)>128 or any(not re.fullmatch(r'[0-9]{1,20}',p) for p in ids):
+        raise Unsupported('rule set outside bounded adapter limit')
+    if not ids:
+        return []
+    # One Redis Lua read, constrained to explicit public policy fields, no mutation.
+    script="local r={} for _,k in ipairs(KEYS) do local row=redis.call('HMGET',k,'type','target','action','direction','scope','disabled','cronTime','expire'); table.insert(row,redis.sha1hex(cjson.encode(redis.call('HGETALL',k)))); table.insert(r,row) end return cjson.encode(r)"
+    rows=json.loads(run(['redis-cli','--raw','EVAL',script,str(len(ids))]+['policy:'+p for p in ids]))
+    if not isinstance(rows,list) or len(rows)!=len(ids):
+        raise Unsupported('rule projection schema')
+    projected=[]
+    for pid,row in zip(ids,rows):
+        if not isinstance(row,list) or len(row)!=9:
+            raise Unsupported('rule fields')
+        projected.append([pid]+row)
+    return projected
+
+
+def managed_vpn_safety(profile):
+    # Metadata only; never open .ovpn/.conf/private keys or query vpnProfiles.
+    import hashlib
+    import stat
+    matches=[]
+    for folder,suffix in (('ovpn_profile','.ovpn'),('wg_profile','.conf')):
+        base='/home/pi/.firewalla/run/'+folder+'/'+profile
+        if os.path.isfile(base+suffix):
+            matches.append(base)
+    if len(matches)!=1:
+        raise Unsupported('existing unambiguous OpenVPN/WireGuard profile required')
+    fd=os.open(matches[0]+'.settings',os.O_RDONLY|os.O_NOFOLLOW)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise Unsupported('settings file type')
+        raw=os.read(fd,32769)
+    finally:
+        os.close(fd)
+    if len(raw)>32768:
+        raise Unsupported('settings size')
+    settings=json.loads(raw)
+    if not isinstance(settings,dict):
+        raise Unsupported('settings shape')
+    selected={k:settings.get(k) for k in ('strictVPN','routeDNS','overrideDefaultRoute','c2sSNATDisabled')}
+    if any(type(v) is not bool for v in selected.values()):
+        raise Unsupported('explicit safety settings required')
+    # Include full settings hash in the stale-state fingerprint, never return settings.
+    return selected,hashlib.sha256(raw).hexdigest()
+
+
+def managed_state(spec, context=None):
+    import hashlib
+    if spec['kind']=='managed_rule':
+        value=managed_rule_value(spec)
+        rows=managed_rule_snapshot()
+        if context:
+            pid=context['pid']
+            selected=[row for row in rows if row[0]==pid]
+            present=bool(selected)
+            field=selected[0] if selected else None
+        else:
+            # Conservative duplicate rejection, including disabled/scheduled rules.
+            present=any(row[1]==value['type'] and row[2]==value['target'] for row in rows)
+            field=None
+        data={'rows':rows,'field':field,'present':present}
+    else:
+        value=managed_field_read(spec)
+        desired=(spec['destination_profile'] if spec['kind']=='managed_vpn' else {'enable':True,'disable':None,'inherit':False}[spec['desired']])
+        present=(value['profileId']==desired if spec['kind']=='managed_vpn' else (value if spec['feature']=='adblock' else value['state']) is desired)
+        data={'field':value,'present':present}
+        if spec['kind']=='managed_vpn':
+            old,old_hash=managed_vpn_safety(spec['expected_profile'])
+            new,new_hash=managed_vpn_safety(spec['destination_profile'])
+            if old!=new:
+                raise Unsupported('VPN safety/DNS settings differ; explicit changes are not supported')
+            data['profile_safety_fingerprints']=[old_hash,new_hash]
+    fingerprint=hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    return {'fingerprint':fingerprint,'present':data['present'],'field':data['field']}
+
+
+def managed_write(args):
+    spec=validate_managed(args['spec'])
+    mode=args['mode']
+    if mode not in ('preview','apply','rollback'):
+        raise ValueError('managed mode')
+    management_guard(args.get('revision'))
+    # Ensure exact device exists; no IP->MAC ambiguity or accidental global target.
+    if run(['redis-cli','--raw','EXISTS','host:mac:'+spec['device']]).strip()!='1':
+        raise Unsupported('device missing')
+    context=args.get('context')
+    state=managed_state(spec,context)
+    if mode=='preview':
+        if spec['kind']=='managed_vpn' and not context and state['field']['profileId']!=spec['expected_profile']:
+            raise Unsupported('expected VPN profile mismatch')
+        return state
+    if args.get('expected')!=state['fingerprint']:
+        return {'outcome':'stale','changed':False}
+    # All failures once a mutation is sent remain uncertain; never automatic retry.
+    try:
+        if spec['kind']=='managed_rule':
+            if mode=='apply':
+                if state['present']:
+                    return {'outcome':'stale','changed':False}
+                value=managed_rule_value(spec)
+                pid=management_request('cmd','policy:create','0.0.0.0',value,True)
+                context={'pid':pid,'before':None}
+            else:
+                if not context or not state['present']:
+                    return {'outcome':'stale','changed':False}
+                management_request('cmd','policy:delete','0.0.0.0',{'policyID':context['pid']})
+        else:
+            if mode=='apply':
+                context={'before':state['field']}
+                if spec['kind']=='managed_vpn':
+                    if state['field']['profileId']!=spec['expected_profile']:
+                        return {'outcome':'stale','changed':False}
+                    value={**state['field'],'profileId':spec['destination_profile']}
+                else:
+                    desired={'enable':True,'disable':None,'inherit':False}[spec['desired']]
+                    value=desired if spec['feature']=='adblock' else {'state':desired}
+            else:
+                if not context or 'before' not in context:
+                    raise Unsupported('rollback context')
+                value=context['before']
+            management_request('set','policy',spec['device'],{managed_field(spec):value})
+        after=managed_state(spec,context)
+        if spec['kind']=='managed_rule':
+            verified=after['present'] if mode=='apply' else not after['present']
+            if mode=='apply' and verified:
+                row=after['field']; desired=managed_rule_value(spec)
+                verified=row[1:5]==[desired['type'],desired['target'],'block','outbound'] and (desired['type']=='mac' or json.loads(row[5])==[spec['device']]) and row[6] in (False,'0',None,'') and row[7] in (False,None,'') and row[8] in (False,None,'')
+        else:
+            verified=after['field']==value
+        return {'outcome':('applied' if mode=='apply' else 'rolled_back') if verified else 'uncertain',
+                'state':after,'context':context,'persistent_state_verified':verified,
+                'enforcement':'unverified_async','effective_device_path':'unverified',
+                'note':'Management acknowledgment and selected stored state only. Enforcement, DNS behavior and kill-switch behavior require independent tests; existing global/group/network rules still apply.'}
+    except Exception:
+        return {'outcome':'uncertain','reason':'Management request or selected verification failed; inspect before any new attempt.'}
+
+
 def dispatch(op, args):
+    if op == "managed_write":
+        return managed_write(args)
     if op == "service_features":
         return service_features(args["feature"])
     if op == "control_state":

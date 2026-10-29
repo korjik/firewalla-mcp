@@ -1,11 +1,11 @@
 # DNS, NTP and RADIUS service coverage
 
-`service_feature_status` reads only allowlisted metadata through SSH. `stage_service_change` returns a **non-executable scope proposal**, not an `apply_change` token. All service mutations below remain unsupported until a reliable management path and before/after semantics are validated. Nothing has been enabled or changed on the appliances.
+`service_feature_status` reads only allowlisted metadata through SSH. `stage_service_change` returns a **non-executable scope proposal**, not an `apply_change` token. Device-scoped DoH/Unbound overrides now have experimental persistent previews in [managed writes](managed-writes.md). Provider/global/network configuration, NTP and RADIUS changes remain unsupported. Nothing has been enabled or changed on the appliances.
 
 | Service | Implemented read | Unsupported / not inferred |
 | --- | --- | --- |
 | DNS over HTTPS | Dynamic feature override and selected provider IDs from `ext.dnscrypt.servers`; scoped raw DoH policy through `device_controls` | Provider stamps, URLs, custom-server credentials, provider CRUD, effective inheritance and executable scoped changes |
-| Unbound | Selected `ext.unbound` fields: upstream transport, DNSSEC, killSwitch, and DNS-over-VPN state/profile reference; scoped/global tri-state observations | No VPN profile/config read; missing fields do not imply defaults. Effective DNS routing, provider changes and mutations unsupported |
+| Unbound | Selected `ext.unbound` fields: upstream transport, DNSSEC, killSwitch, and DNS-over-VPN state/profile reference; scoped/global tri-state observations | No VPN profile/config read; missing fields do not imply defaults. Effective DNS routing and provider changes unverified/unsupported; device override writes separately implemented |
 | Custom DNS Rules | Explicit unsupported result | Domain-to-IP override schema, listing and CRUD not validated; no direct Redis/config-file edits |
 | NTP Intercept | Dynamic `ntp_redirect` override and cached `sys:ntp:status` | Cache can be stale; network scope/interception effectiveness unresolved. No system clock or NTP service changes |
 | RADIUS | Dynamic `freeradius_server` flag only | Runtime/config management, users, enrollment, shared secrets, certificates/private keys and access expansion unsupported; no policy/config read |

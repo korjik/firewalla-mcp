@@ -325,9 +325,39 @@ def build_server(config: Config, transport=None, readonly_catalog=False):
     def write_capabilities() -> dict:
         """Describe configured write gates and unsupported persistent management paths."""
         return {"enabled": config.writes_enabled,
-                "implemented": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions"],
+                "implemented": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions", "revision-pinned persistent device tri-state controls, outbound block rules and existing-profile device VPN switches"],
                 "approval": "Operator-created one-time approval file bound to preview digest; no MCP approval tool",
-                "unsupported": ["persistent Firewalla routes/rules/port forwards", "device policy/block changes", "VPN controls", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
+                "unsupported": ["persistent Firewalla routes/port forwards", "group/global policies, schedules, rule updates", "VPN profile import/connect/disconnect", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
+
+    @mcp.tool(annotations=READ)
+    async def preview_managed_device_control(box_name: Name, device: Mac,
+            feature: Literal["adblock","safeSearch","unbound","doh"],
+            desired: Literal["enable","disable","inherit"]) -> dict:
+        """Preview persistent device policy through existing Firewalla management logic.
+        Requires pinned clean source, allowlisted device, existing explicit policy and host approval.
+        true=enable, false=inherit, null=explicit disable. Stored state is not enforcement proof.
+        """
+        return await writes.preview(box_name,dict(kind="managed_feature",device=device.upper(),feature=feature,desired=desired))
+
+    @mcp.tool(annotations=READ)
+    async def preview_managed_block_rule(box_name: Name, device: Mac,
+            rule_type: Literal["internet","category","app","ip","dns"],target: str) -> dict:
+        """Preview persistent outbound block for one device using policy:create.
+        Categories: games/social/av/porn/vpn. Apps require dynamic ACL declaration.
+        No schedules/allow rules/broad scope. Rollback deletes only this newly created rule.
+        """
+        return await writes.preview(box_name,dict(kind="managed_rule",device=device.upper(),rule_type=rule_type,target=target))
+
+    @mcp.tool(annotations=READ)
+    async def preview_managed_vpn_switch(box_name: Name, device: Mac,
+            expected_profile: Name,destination_profile: Name) -> dict:
+        """Preview persistent device VPN policy switch between existing allowlisted profiles.
+        Requires explicit enabled source policy, matching selected safety/DNS settings, existing
+        OpenVPN/WireGuard profiles. No profile credentials read/imported or settings changed.
+        Selected settings are inspected locally; live validation requires separate approval.
+        Effective device routing remains unverified until independent traffic checks.
+        """
+        return await writes.preview(box_name,dict(kind="managed_vpn",device=device.upper(),expected_profile=expected_profile,destination_profile=destination_profile))
 
     @mcp.tool(annotations=READ)
     async def preview_route_change(box_name: Name, destination: str, table: int,
@@ -376,7 +406,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False):
         return await writes.rollback_preview(plan_id)
 
     if readonly_catalog:
-        for name in ("apply_change","preview_route_change","preview_firewall_rule","preview_port_forward","preview_rollback"):
+        for name in ("apply_change","preview_route_change","preview_firewall_rule","preview_port_forward","preview_rollback","preview_managed_device_control","preview_managed_block_rule","preview_managed_vpn_switch"):
             mcp.remove_tool(name)
     return mcp
 
