@@ -15,6 +15,9 @@ class Site(BaseModel):
     identity_file: str
     known_hosts_file: str
     probe_networks: list[str] = []
+    allowed_route_tables: list[int] = []
+    allowed_filter_chains: list[Name] = []
+    allowed_nat_chains: list[Name] = []
     vantage_group: Name
 
     @field_validator("host")
@@ -37,6 +40,9 @@ class Site(BaseModel):
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sites: dict[Name, Site]
+    writes_enabled: bool = False
+    approval_directory: str | None = None
+    audit_file: str | None = None
 
     def target(self, site: str, address: str):
         address = str(ip_address(address))

@@ -14,3 +14,6 @@ jobs:
       - run: pytest -q
       - run: docker build -t firewalla-mcp:test .
       - run: python tests/container_smoke.py firewalla-mcp:test
+      - run: python tests/http_container_smoke.py firewalla-mcp:test
+      - run: docker build -f tests/Dockerfile.kernel -t firewalla-mcp:kernel-test .
+      - run: docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN -v "$PWD/tests:/tests:ro" firewalla-mcp:kernel-test

@@ -19,7 +19,7 @@ Status as of 2026-10-29. Two owner-authorized appliances were probed through an 
 | Central diagnosis | Separate evidence and conservative verdict | Mock independent success despite local failure | Exact mapping/policy proof and provider adapter |
 | Traffic and alarms | Cumulative interface counters and active alarm count in a bounded score window | Both helper adapters passed on both appliances | Per-device history, descriptions, alarm record fields |
 | Packet metadata | Not implemented | No capture performed | Explicit opt-in, packet/time cap, zero payload exposure |
-| Persistent mutations | Disabled / absent | No setting changes performed | Individually reviewed and mocked adapters only |
+| Temporary kernel writes | Opt-in route/filter/DNAT additions and approved rollback | Approval mocks and isolated kernel tests; no appliance mutation | Persistent managed changes, device/VPN/maintenance writes |
 
 The helper requires Python 3 and `timeout`; adapters probe utility availability and validate schemas on each call. Missing tools or unfamiliar/oversized output remain unsupported. Utility presence alone is not evidence of adapter support. There is no version string allowlist that pretends to validate unknown releases.
 

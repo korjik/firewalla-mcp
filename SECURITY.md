@@ -1,6 +1,6 @@
 # Security model
 
-Read-only means no persistent device changes are implemented. DNS and TCP probes generate bounded network traffic. SSH authentication itself can create normal system logs. Never grant a model unrestricted SSH shell access through this server.
+Read-only is the default. Optional write tools change temporary kernel state only after host-side operator approval; persistent Firewalla-managed changes are not implemented. DNS and TCP probes generate bounded network traffic. SSH authentication itself can create normal system logs. Never grant a model unrestricted SSH shell access through this server.
 
 - The public MCP catalog is explicit and typed. No tool accepts shell commands, Redis keys, paths, executable names, scripts, or arbitrary command flags.
 - SSH hosts are literal IP addresses from administrator-owned configuration. Users select labels only. TCP probes are confined to configured CIDRs. DNS queries are validated labels and may use the configured system resolver.
@@ -11,8 +11,12 @@ Read-only means no persistent device changes are implemented. DNS and TCP probes
 - Diagnostic metadata (addresses, MACs, interface/ipset names and rule counters) can still be sensitive and will reach the connected MCP client/model. Use trusted clients, minimize retention, and avoid sharing results publicly. Remote text is data, not instructions. Projection is not a guarantee against a malicious router deliberately encoding secrets in allowed metadata fields.
 - IPv4 firewall listings omit arbitrary rule comments/log prefixes and return numeric counters and basic matches only. They are not a full policy evaluator. Missing utilities, permissions, unfamiliar schemas or excessive output produce `unsupported`, never a fabricated result.
 - `pi` and its key may permit administration outside this application. A compromised MCP host/key can bypass application restrictions. A restricted-account/forced-command deployment needs separate careful design and is not installed here.
-- Only stdio is supported. Docker has no published ports, runs nonroot without capabilities, and mounts config/credentials read-only. Do not put an unauthenticated stdio-to-HTTP gateway on a network.
+- Stdio and authenticated Streamable HTTP are supported. HTTP requires a file-backed bearer secret, explicit Host allowlist for non-loopback binding, and rejects browser Origin/query tokens. Default HTTP catalog removes executable write tools. Keep backend reachability private and protect any cross-host link with TLS; Okta authorization belongs at the gateway. See docs/contextforge-okta.md. Docker runs nonroot without capabilities and mounts config/credentials read-only.
 
-Not implemented: persistent mutations, rule changes, VPN switching, port assignment changes, packet capture, package installation, service restart, scheduled tasks, or internal HTTP API enablement. Packet metadata capture is deferred until an explicit opt-in, bounded, payload-free adapter can be independently validated. Do not substitute raw tcpdump output.
+Optional temporary route/filter/DNAT additions and exact approved rollback are described in [write security and approval boundaries](docs/writes.md). They require existing sudo access and can disrupt connectivity. A host-controlled approval file is mandatory; no MCP tool can approve a plan. Snapshot checks are not atomic against external writers.
+
+Not implemented: persistent managed mutations, VPN switching, provider port assignment changes, packet capture, package installation, service restart, scheduled tasks, or internal HTTP API enablement. Packet metadata capture is deferred until an explicit opt-in, bounded, payload-free adapter can be independently validated. Do not substitute raw tcpdump output.
 
 Report vulnerabilities privately through the repository owner's GitHub contact before posting operational details. Never include private keys, tokens, router IPs or raw traffic in a public issue.
+
+Per-device flow tools intentionally return selected private traffic metadata to the authorized MCP client: destination IP/domain/port, timestamps, direction and known bytes. They omit URLs/query strings, payloads and arbitrary fields. Treat results as private; never copy live flow data into public fixtures or docs. Control/VPN staging tools cannot produce executable approval tokens. Do not use a full init or VPN-profile management response to extract a small public field: such responses can contain secrets.

@@ -5,3 +5,5 @@
 !src
 !src/**
 src/**/__pycache__
+!tests
+!tests/Dockerfile.kernel

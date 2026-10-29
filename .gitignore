@@ -6,3 +6,8 @@ config.json
 secrets/
 *.pem
 .env
+config-read.json
+config-write.json
+approvals/
+audit/
+*.token

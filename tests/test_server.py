@@ -109,8 +109,9 @@ async def test_transport_timeout_kills(monkeypatch,config):
 
 async def test_catalog(config):
     tools=await build_server(config).list_tools()
-    assert len(tools)==21
-    assert all(t.annotations.readOnlyHint for t in tools)
+    assert len(tools)==39
+    assert all(t.annotations.readOnlyHint for t in tools if t.name != "apply_change")
+    assert next(t for t in tools if t.name == "apply_change").annotations.destructiveHint
     assert not any("shell" in t.name for t in tools)
 
 def test_quoting():
@@ -153,3 +154,42 @@ def test_added_adapter_validation(operation,args,monkeypatch):
 def test_inventory_empty_nonterminal(monkeypatch):
     monkeypatch.setattr(remote,"run",lambda *a,**k:"64\n\n")
     assert remote.dispatch("inventory",{"cursor":"0"})["macs"]==[]
+
+def test_alarm_fields_only(monkeypatch):
+    commands=[]
+    def read(argv):
+        commands.append(argv)
+        if 'TYPE' in argv:return 'zset'
+        if 'ZREVRANGE' in argv:return '12\n'
+        return 'ALARM_NEW_DEVICE\n1700000000\n\n'
+    monkeypatch.setattr(remote,'run',read)
+    result=remote.dispatch('alarm_summaries',{'limit':3})
+    assert result['records'][0]['type']=='ALARM_NEW_DEVICE'
+    assert commands[-1][-3:]==['type','timestamp','alarmTimestamp']
+    assert not any('HGETALL' in x for x in commands)
+
+def test_policy_selected_fields(monkeypatch):
+    def read(argv):
+        if 'TYPE' in argv:return 'zset'
+        if 'ZREVRANGE' in argv:return '42\n'
+        return 'ip\nblock\n1\ninbound\n'
+    monkeypatch.setattr(remote,'run',read)
+    result=remote.dispatch('policy_summaries',{'limit':3})
+    assert result['records'][0]['disabled'] is True
+
+def test_flow_aggregation_redacts(monkeypatch):
+    flows=[dict(ob=10,rb=20,lh='192.0.2.2',sh='192.0.2.2',pr='tcp',token='secret',af={'private.example':{}}),dict(ob=5,rb=7,lh='192.0.2.2',sh='203.0.113.2',pr='udp')]
+    monkeypatch.setattr(remote,'run',lambda a:'zset' if 'TYPE' in a else '\n'.join(json.dumps(f) for f in flows))
+    result=remote.dispatch('flow_sample',{'limit':20})
+    assert result['sample_upload_bytes']==17 and result['sample_download_bytes']==25
+    assert 'secret' not in json.dumps(result) and '192.0.2' not in json.dumps(result) and 'private.example' not in json.dumps(result)
+
+@pytest.mark.parametrize('op',['flow_sample','alarm_summaries','policy_summaries'])
+def test_sample_limits(op,monkeypatch):
+    monkeypatch.setattr(remote,'run',lambda a:pytest.fail('must not read'))
+    assert remote.execute(op,{'limit':0})['status']=='unsupported'
+
+def test_unknown_flow_schema(monkeypatch):
+    monkeypatch.setattr(remote,'run',lambda a:'zset' if 'TYPE' in a else '{"password":"secret"}')
+    result=remote.execute('flow_sample',{'limit':1})
+    assert result['status']=='unsupported' and 'secret' not in json.dumps(result)
