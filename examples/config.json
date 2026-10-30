@@ -1,0 +1,20 @@
+{
+  "sites": {
+    "router-a": {
+      "host": "192.0.2.1",
+      "user": "pi",
+      "identity_file": "/secrets/router-a_ed25519",
+      "known_hosts_file": "/secrets/known_hosts",
+      "probe_networks": ["192.0.2.0/24", "203.0.113.8/32"],
+      "vantage_group": "network-a"
+    },
+    "router-b": {
+      "host": "198.51.100.1",
+      "user": "pi",
+      "identity_file": "/secrets/router-b_ed25519",
+      "known_hosts_file": "/secrets/known_hosts",
+      "probe_networks": ["203.0.113.8/32"],
+      "vantage_group": "network-b"
+    }
+  }
+}

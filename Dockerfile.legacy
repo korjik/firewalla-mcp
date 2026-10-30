@@ -1,0 +1,11 @@
+# For NAS Docker installations without Buildx; no build secrets required.
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.lock pyproject.toml ./
+COPY src ./src
+RUN pip install --no-cache-dir -r requirements.lock && pip install --no-cache-dir --no-deps .
+RUN groupadd --gid 10001 firewalla && useradd --no-log-init --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin firewalla
+USER 10001:10001
+ENV FIREWALLA_MCP_CONFIG=/config/config.json PYTHONDONTWRITEBYTECODE=1
+ENTRYPOINT ["firewalla-mcp"]

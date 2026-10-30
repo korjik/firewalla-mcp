@@ -1,0 +1,26 @@
+# Standalone example: docker compose -f compose.http.yaml up --build -d
+# Keep config-read.json writes_enabled=false. Provision token/key files separately.
+services:
+  firewalla-read:
+    build: .
+    image: firewalla-mcp:local
+    command: ["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
+    user: "${MCP_UID:-10001}:${MCP_GID:-10001}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 1
+    environment:
+      FIREWALLA_MCP_CONFIG: /config/config.json
+      FIREWALLA_MCP_HTTP_TOKEN_FILE: /secrets/http-read-token
+      FIREWALLA_MCP_HTTP_ALLOWED_HOSTS: firewalla-read:8000,localhost:8000,127.0.0.1:8000
+    volumes:
+      - ./config-read.json:/config/config.json:ro
+      - ./secrets:/secrets:ro
+    # Loopback only. Verify actual port availability before deployment.
+    ports: ["127.0.0.1:8000:8000"]
+    # For a gateway on a separate container network, attach its trusted network
+    # with the exact allowed Host and backend bearer configured; register http://firewalla-read:8000/mcp.
+    # Remove published ports if the gateway shares this private network.

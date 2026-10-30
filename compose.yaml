@@ -1,0 +1,18 @@
+services:
+  firewalla-mcp:
+    build: .
+    image: firewalla-mcp:local
+    stdin_open: true
+    tty: false
+    read_only: true
+    user: "${MCP_UID:-10001}:${MCP_GID:-10001}"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 1
+    volumes:
+      - ./config.json:/config/config.json:ro
+      - ./secrets:/secrets:ro
+    # stdio only: no ports published, no HTTP authentication surface.
+    # Start per client with: docker compose run --rm -T firewalla-mcp

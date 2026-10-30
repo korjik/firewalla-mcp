@@ -1,0 +1,7 @@
+# Isolated local/CI kernel adapter tests only. Never deploy this image to a router.
+FROM firewalla-mcp:test
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends iproute2 iptables && rm -rf /var/lib/apt/lists/*
+# The sandbox is already root; mimic only sudo -n argv dispatch, without privileges outside its namespace.
+RUN printf '#!/bin/sh\n[ "$1" = "-n" ] && shift\nexec "$@"\n' > /usr/local/bin/sudo && chmod 755 /usr/local/bin/sudo
+ENTRYPOINT ["python", "/tests/kernel_smoke.py"]

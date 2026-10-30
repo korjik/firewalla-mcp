@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+config.json
+secrets/
+*.pem
+.env
+config-read.json
+config-write.json
+approvals/
+audit/
+*.token
+
+# Publish only the sanitized installation template, never runtime configs.
+!examples/config.json

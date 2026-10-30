@@ -1,0 +1,11 @@
+*
+!Dockerfile
+!pyproject.toml
+!requirements.lock
+!src
+!src/**
+src/**/__pycache__
+!tests
+!tests/Dockerfile.kernel
+
+!Dockerfile.legacy
