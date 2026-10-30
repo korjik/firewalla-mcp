@@ -1,7 +1,6 @@
 # Persistent VPN forwarding and shared confirmation
 
-Local candidate only. No live mapping has been installed by this work. The deployed
-catalog remains VPN-only until explicit approval expands its command boundary.
+These source-supported adapters require the combined write catalog, compatible firmware and restricted router permissions. Live forwarding enforcement and restart persistence are not certified; see the [support matrix](features.md).
 
 ## Installed contract and limits
 
@@ -86,8 +85,7 @@ steps and the stopped index, preserves uncertain state and requires inspection p
 a fresh exact remaining plan/confirmation. No automatic cross-step compensation is
 claimed. Workflow-created forwards do not yet have an exposed inverse-plan tool;
 removal requires separately reviewed native management action, not a fabricated
-rollback token. Single-forward plans retain their conditional rollback tool. Cross-plugin external application configuration
-host-coordinated user preview, but Firewalla does not execute those other tools.
+rollback token. Single-forward plans retain their conditional rollback tool. External application configuration can be included in a host-coordinated user preview, but Firewalla does not execute those other tools.
 Material changes or new steps require new confirmation. No live mixed plan tested.
 
 ## Audit of existing writers
@@ -102,9 +100,7 @@ Material changes or new steps require new confirmation. No live mixed plan teste
 | Scoped group/network DNS/NTP | Shared general confirmation supported | Current group/network Ad Block/Safe Search/Unbound source contracts; NTP/DoH remain blocked |
 | General permanent routes, RADIUS enrollment, arbitrary services | Unsupported | No validated management adapter |
 
-Confirmation does not make an unsupported contract valid. General firmware guards
-remain fail-closed; only persistent-forward kinds receive the additional reviewed
-current-revision permission. The default confirmation mode remains compatible.
+Confirmation does not make an unsupported firmware contract valid. Each operation requires its reviewed source guards and restricted SSH permissions. Existing file-based approval configurations must follow the explicit [host-confirmed migration](approvals.md#migrating-from-file-based-approval) before enabling writes.
 
 ## Deployment review still required
 
@@ -113,8 +109,7 @@ new remote helper hash, and a narrowly expanded SSH gate permitting only
 `managed_forward`/`managed_forward_batch` alongside previously approved kinds, plus
 the fixed read-only `managed_workflow_state` projection. Mixed plans invoke only
 those individual approved mutations through internal SSH.
-Select the general host-confirmed catalog/configuration and refresh the same CF
-identity; do not broadly allow all `managed_*` operations. Rebuild the pinned import
+Select the general host-confirmed catalog/configuration and refresh the existing gateway integration; do not broadly allow all `managed_*` operations. Rebuild the pinned import
 bundle if its embedded remote code changes, retaining its existing import scope.
 No live forwarding, firewall, route or VPN test is authorized by implementation.
 
@@ -130,6 +125,4 @@ Combined catalog rollout: select `--allow-write-catalog` and enable the required
 `vpn_writes_enabled=true`, `vpn_confirmation_mode=host_confirmed`, and
 `vpn_target_policy=approval_bound`. The 57-tool combined catalog preserves the
 existing 43 VPN-catalog tools; exact operation guards still determine availability.
-The proposed narrow network SSH gate does not enable legacy device/app/DNS or kernel
-writers merely because their MCP tools exist. Their permissions/contracts need their
-own review. Five policy/control dependencies were subsequently reviewed with explicit approval; the separate managed gate template covers only those reviewed additions. No production gate was expanded.
+The network gate permits the documented VPN/forwarding operations. Device/app/DNS operations require the separate managed gate and compatible firmware contracts; kernel writers require their own restricted permissions. Tool registration alone grants none of these permissions.
