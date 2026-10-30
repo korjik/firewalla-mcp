@@ -21,3 +21,7 @@ The [generated tool reference](tool-reference.md) is the complete schema catalog
 | RADIUS, users/time quotas, arbitrary maintenance | No safe complete management contract | Unsupported; no enrollment, restart/reboot, arbitrary shell or credential-export tool |
 
 `write_capabilities.configured_contracts` reports revision eligibility per configured box. It explicitly does not certify installed source, gate permissions or live behavior. Preview performs those checks. Failure/unknown is never an empty configuration or proof of enforcement.
+
+## Open review findings
+
+See [approval implementation gaps](approvals.md#known-implementation-gaps-under-review) before enabling candidate writers: legacy operator/allowlist paths have an issuer-validation gap, and new managed-rule activation lacks a second expiry check after disabled-rule creation. These findings are not fixed by the documentation update. Host-confirmed mode intentionally trusts the authenticated host; it does not attest human consent.

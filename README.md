@@ -169,7 +169,7 @@ In opt-in **host-confirmed** mode:
 3. **Apply:** the Firewalla MCP server checks the plan and executes through its internal SSH transport.
 4. **Verify:** inspect per-step results and any unresolved outcome before taking further action.
 
-The server enforces target/settings binding, expiry, one-time use, expected-state checks and supported-operation/firmware boundaries. **The host enforces human confirmation; the server does not independently attest your reply.** Only use this mode with a trusted authenticated client. No external approval-file or SSH-plugin step is required. See the [trust model](docs/host-confirmed-vpn.md).
+Host-confirmed execution enforces target/settings binding, apply-time expiry, one-time use, expected-state checks and supported-operation/firmware boundaries. Review the [known implementation gaps](docs/approvals.md#known-implementation-gaps-under-review) before enabling candidate managed-rule writers or legacy operator mode. **The host enforces human confirmation; the server does not independently attest your reply.** Only use this mode with a trusted authenticated client. No external approval-file or SSH-plugin step is required. See the [trust model](docs/host-confirmed-vpn.md).
 
 A multi-action plan can bind supported VPN start → device switch → forwarding steps to one approval. It is not an atomic transaction: execution stops on unexpected failure and reports partial results. Material changes require a fresh preview; rollback is conditional where supported, not a promise to undo concurrent edits or external application actions.
 

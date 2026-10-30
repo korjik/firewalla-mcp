@@ -10,7 +10,7 @@ The preview → explicit confirmation → apply workflow covers supported genera
 4. Invoke the corresponding apply/start tool with its plan ID. The server performs SSH internally; the assistant does not need an SSH connector or approval-file step in host-confirmed mode.
 5. Report verified, partial, stale or uncertain outcomes. Inspect an uncertain result before proposing anything further. Do not repeat an action merely because the transport timed out.
 
-Target/settings changes require a new preview and confirmation. The server binds plans to configuration and prior state, checks expiry and consumes execution claims once. A repeated apply may return a recorded result, but must not dispatch the mutation again. Pending plans disappear on restart; the persistent consumption ledger must remain intact. These guards do not make concurrent external changes atomic or prove effective traffic enforcement.
+Target/settings changes require a new preview and confirmation. The host-confirmed execution path binds plans to configuration and prior state, checks expiry at dispatch and consumes execution claims once. The activation-deadline gap below limits that guarantee for new managed rules. A repeated apply may return a recorded result, but must not dispatch the mutation again. Pending plans disappear on restart; the persistent consumption ledger must remain intact. These guards do not make concurrent external changes atomic or prove effective traffic enforcement.
 
 ## Which tools use which approval?
 
@@ -70,4 +70,14 @@ Use [installation](install.md) and [write setup](writes.md) for mounts and restr
 
 **The authenticated host enforces the human confirmation.** An authenticated client that ignores the workflow can call apply without asking; the server does not attest the human reply. MCP annotations are hints, not mandatory UI enforcement. Exact plan/state/replay checks still run server-side. Use only trusted clients, private authenticated access and reviewed router command gates. The [VPN trust-model detail](host-confirmed-vpn.md) explains that boundary further.
 
-Legacy `operator` mode remains in code for deployments deliberately using separately issued, owner-protected approval files. It is not the normal host-confirmed setup. The superseded external-issuer deployment narrative has been removed from the current guide; repository history retains it. No new issuer, credential or external SSH approval step is needed for host-confirmed operation.
+Legacy `operator` mode remains in code, but the independent review below found a trust-validation gap in some paths. Do not use it as an alternative security boundary until corrected and verified. It is not the normal host-confirmed setup. The superseded external-issuer deployment narrative has been removed from the current guide; repository history retains it. No new issuer, credential or external SSH approval step is needed for host-confirmed operation.
+
+## Known implementation gaps under review
+
+These findings concern the current source; this documentation update does not fix runtime behavior:
+
+- **Legacy operator/allowlist paths:** general operator-mode execution can bypass the trusted-issuer UID validation and separate consumption ledger used by the approval-bound operator path. It also links/unlinks inside the approval inbox. The reviewer reproduced acceptance of a server-UID-created artifact despite a different configured trusted issuer. Legacy allowlist VPN/import paths are affected too. Do not rely on those paths to separate issuer and executor. This is distinct from the intentionally host-trusting `host_confirmed` model.
+- **New managed-rule activation:** the router checks the deadline before creating a disabled rule, but does not recheck immediately before enabling it. Activation can therefore occur after approval expiry if creation runs long. Treat this writer as pending correction before production enablement; an apply-time expiry check is not a guaranteed per-step deadline.
+- **Legacy issuer script:** `scripts/issue_vpn_approval.py` contains a deployment-specific inbox path and group ID. It is not a portable installer and is not part of the recommended host-confirmed workflow.
+
+The stale `preview_rollback` tool wording noted above is a separate documentation/schema issue. No runtime fix or broader deployment is implied by this guide. See [support status](features.md) and verify fixes before enabling affected paths.
