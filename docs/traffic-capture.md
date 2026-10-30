@@ -68,10 +68,10 @@ applies. Capture jobs/results are transient and are lost on backend restart.
 
 Approve backend capture opt-in, existing private ledger/audit mounts, the reviewed
 capture-helper pin and narrowly scoped root-capture gate branch, plus refresh of
-these four tools in the same ContextForge integration. Do not enable the pending
+these four tools in the same MCP gateway integration. Do not enable the pending
 network-write gate or any unrelated operation as a side effect. The candidate
 capture gate starts from the existing VPN gate; it does not allow persistent-forward
-or generic writes. No new keys/credentials, sudo grants or Okta identities are part
+or generic writes. No new keys/credentials, sudo grants or OAuth provider identities are part
 of this proposal. If existing sudo cannot run the exact helper, report that blocker;
 do not broaden it automatically. A real capture needs a separate exact-scope host
 confirmation; implementation/deployment approval is not capture authorization.

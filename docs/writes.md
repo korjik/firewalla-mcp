@@ -1,6 +1,6 @@
 # Write modes, confirmation and failure handling
 
-Use the [host-confirmed workflow](host-confirmed-vpn.md) for the reference installation. Default read-only mode remains safe to install without writer configuration. Do not enable source adapters merely because they appear in the generated catalog.
+Use the [approval workflow across tools](approvals.md) for the reference installation. Default read-only mode remains safe to install without writer configuration. Do not enable source adapters merely because they appear in the generated catalog.
 
 ## One action
 
@@ -25,4 +25,12 @@ General writes additionally require `--allow-write-catalog`, `writes_enabled=tru
 
 Temporary kernel routes/filter/DNAT are explicitly nonpersistent. Managed VPN forwarding uses native Firewalla management and source-reviewed startup restoration, but live persistence/enforcement has not been tested. No adapter enables a development endpoint or changes raw policy Redis data.
 
-Legacy `operator` mode is retained for existing operators who intentionally choose separately issued approval files. Its historical guide is [here](approval-bound-vpn.md); it is not required by the host-confirmed installation.
+Legacy `operator` mode is retained for existing operators who intentionally choose separately issued approval files. It is not required by the host-confirmed installation; see [mode distinctions](approvals.md#configuration-and-trust).
+
+## Restricted router key
+
+An unrestricted `pi` key remains powerful. Use the reviewed `scripts/vpn_only_ssh_gate.py` or capture extension `scripts/capture_ssh_gate.py` as a forced command for the dedicated key. These are templates, not automatic installers. Compute SHA256 of the exact release `src/firewalla_mcp/remote.py`, capture helper where enabled, and the import zipapp produced by `scripts/build_vpn_import_helper.py`. Replace only the digest placeholders in the gate. Unknown pins fail closed.
+
+Install reviewed gate/import artifacts in the account's mode0700 `.ssh` directory, owner `pi`, preserving existing files and keeping rollback copies; import helper mode0600. Attach a fixed forced-command path with `restrict` to only the dedicated public-key entry in `authorized_keys`. Preserve unrelated keys and verify the public-key fingerprint. Review source and operation allowlist before enabling it. Never allow arbitrary Python source or shell. Capture permits only the pinned helper under a fixed timeout and existing noninteractive sudo; verify `/usr/bin/tcpdump`. No sudo grants are supplied by this project.
+
+Import requires additional protected registered inputs and policy described in [VPN import contract](vpn-mcp-writes.md). Merely enabling the catalog does not upload/register archives or authorize copying credentials. General forwarding/kernel/device-control permissions are excluded from the VPN/capture gate. The separate `scripts/managed_ssh_gate.py` template can permit reviewed device/app/DNS operations only after deployment review; it does not permit temporary kernel writes or unreviewed DoH/NTP.

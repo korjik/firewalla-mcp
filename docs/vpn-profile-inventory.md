@@ -41,6 +41,6 @@ on both appliances. Exact service replacement approval remains outstanding.
 
 
 After exact service replacement approval, inventory-v1 was deployed successfully.
-Both inventories passed backend MCP and ContextForge invocation checks on both
+Both inventories passed backend MCP and MCP gateway invocation checks on both
 appliances, including structured output. The earlier rejection is resolved;
 rollback artifacts remain available. No new OAuth consent round trip was tested.

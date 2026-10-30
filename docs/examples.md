@@ -72,9 +72,9 @@ preview, bound approval and verification; see the managed-write documentation.
 
 ## Refresh an existing ChatGPT app
 
-After an approved backend upgrade and ContextForge catalog refresh, open the
+After an approved backend upgrade and MCP gateway catalog refresh, open the
 existing app's **Manage → Manage app → Refresh tools** action (wording/availability
-can vary by account). Review the updated tools. Do not recreate the Okta client,
+can vary by account). Review the updated tools. Do not recreate the OAuth provider client,
 change its identity or duplicate the integration just to refresh schemas.
 
 ## Confirmed VPN change

@@ -48,5 +48,5 @@ available alongside explanatory presentation; unresolved dynamic labels are not
 fabricated.
 
 ChatGPT keeps an approved tool-definition snapshot. After schema refresh in
-ContextForge, the owner/admin must refresh/review the existing app actions in
+MCP gateway, the owner/admin must refresh/review the existing app actions in
 ChatGPT; this does not require recreating OAuth or the integration.

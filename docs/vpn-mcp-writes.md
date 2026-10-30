@@ -101,6 +101,6 @@ There is no claim that a runtime start updates persistent system VPN policy.
 
 Deployment must separately approve the helper hash and narrow SSH operations,
 protected registry and approval mounts, and replacing the same backend image.
-Refresh the existing ContextForge tool catalog and verify all seven schemas and
+Refresh the existing MCP gateway tool catalog and verify all seven schemas and
 rejected unapproved calls, then refresh tools in the existing ChatGPT app. No new
-Okta client, audience, callback or integration is required. The private pilot received the separately approved narrow SSH gate expansion; no live VPN mutation was performed during deployment verification.
+OAuth provider client, audience, callback or integration is required. The private pilot received the separately approved narrow SSH gate expansion; no live VPN mutation was performed during deployment verification.

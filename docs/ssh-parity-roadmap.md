@@ -34,7 +34,7 @@ Priorities after the current read-result fixes:
 
 See the [current coverage](requested-coverage.md), [feature catalog](features.md),
 [read audit](read-audit.md), [examples](examples.md), [SSH setup](ssh-setup.md),
-and [HTTP/ContextForge/Okta guide](contextforge-okta.md). Gold Plus/x86_64 and
+and [HTTP/Gateway/OAuth guide](authentication.md). Gold Plus/x86_64 and
 Gold SE/aarch64 have bounded read checks; this is not full-model or full-feature
 certification. Docker host architecture is separate from SSH target architecture.
 

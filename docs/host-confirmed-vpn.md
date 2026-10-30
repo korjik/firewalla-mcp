@@ -47,10 +47,10 @@ not proof of routing or kill-switch enforcement.
 ## Deployment scope
 
 Build and replace the backend image, set the two mode fields, keep the private
-consumption ledger and audit storage, and refresh the existing ContextForge tool
+consumption ledger and audit storage, and refresh the existing MCP gateway tool
 catalog. No router helper hash or operation allowlist changes are needed: the
 underlying supported SSH commands and state checks are unchanged. Do not recreate
-Okta/client/server identities or add credentials/sudo grants. The old issuer and
+OAuth provider/client/server identities or add credentials/sudo grants. The old issuer and
 approval inbox may remain unused for rollback; removing them is a separate cleanup,
 not a prerequisite. Do not deploy the abandoned external-helper guidance workflow.
 

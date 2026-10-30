@@ -32,4 +32,4 @@ app display counts may use a different grouping or retention view. No screenshot
 count is hardcoded or treated as current truth. A complete empty Person has zero
 explicit assignments; a similarly named unassigned device is listed separately
 as a name match, never as ownership. The collector was read-tested on both
-platforms, and the new tool passed backend MCP and ContextForge invocation tests.
+platforms, and the new tool passed backend MCP and MCP gateway invocation tests.

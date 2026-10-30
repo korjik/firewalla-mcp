@@ -6,7 +6,7 @@ This guide uses generic paths and addresses. Review the [support matrix](feature
 
 Choose a private persistent directory on the Docker host, such as `/srv/firewalla-mcp`. Keep it outside the source checkout. Store `config.json`, `compose.yaml`, dedicated SSH keys, verified `known_hosts`, bearer secret, audit and consumption ledger there. Restrict the runtime directory to its administrator; expose only the required mounts to container UID/GID10001.
 
-Follow [SSH setup](ssh-setup.md). Copy `examples/config.json`; `sites` accepts arbitrary canonical box names. Every host must be a literal IP and have its own verified key entry. Optional `aliases` map display names to canonical boxes. `probe_networks` controls active TCP targets; use narrow actual ranges, not the documentation ranges. `vantage_group` labels independently administered network paths; it does not prove path independence.
+Enable access using the official [Firewalla SSH guide](https://help.firewalla.com/hc/en-us/articles/115004397274-How-to-access-Firewalla-using-SSH), then follow our [dedicated-key setup](ssh-setup.md). Use trusted LAN/VPN reachability, never public WAN SSH exposure. Copy `examples/config.json`; `sites` accepts arbitrary canonical box names. Every host must be a literal IP and have its own verified key entry. Optional `aliases` map display names to canonical boxes. `probe_networks` controls active TCP targets; use narrow actual ranges, not the documentation ranges. `vantage_group` labels independently administered network paths; it does not prove path independence.
 
 Private keys must be readable only by the container identity (mode0600), with parent traversal permitted. `known_hosts` and config mount read-only. Do not copy personal connector private keys or expose SSH publicly. A wrong host key is a blocker, not a reason to disable checking.
 
@@ -28,39 +28,40 @@ docker compose -f /srv/firewalla-mcp/compose.yaml up -d
 
 The image includes a passwd entry for UID10001. Arbitrary numeric UID overrides require a matching account entry. Keep read-only rootfs, dropped capabilities, no-new-privileges and memory limits. NAS kernels without CPU CFS use the no-quota example; do not alter host cgroups or Docker socket permissions.
 
-## 3. Optional VPN and capture
+## 3. Choose capabilities (optional)
 
-Copy the read config and add:
+Skip this step for read-only installation. It exists because exposing a tool catalog, authorizing its router commands and persisting execution guards are separate setup requirements. It does not authorize a live action.
+
+| Capability | Catalog flag | Configuration |
+|---|---|---|
+| Read/inspection | None | Leave write and capture flags false |
+| VPN operations only | `--vpn-write-catalog` | `vpn_writes_enabled=true`, `vpn_confirmation_mode="host_confirmed"`, `vpn_target_policy="approval_bound"`; keep `writes_enabled=false` |
+| General supported writes | `--allow-write-catalog` | `writes_enabled=true`, `write_confirmation_mode="host_confirmed"`; firmware and operation restrictions still apply |
+| VPN import in combined catalog | `--allow-write-catalog` | Also set `vpn_writes_enabled=true`, `vpn_confirmation_mode="host_confirmed"`, `vpn_target_policy="approval_bound"`; retain general writes enabled |
+| Bounded capture | Either catalog or read catalog | `capture_enabled=true`; capture uses host-confirmed scope approval |
+
+Do not combine the two catalog flags. Enable only capabilities you intend to administer. General writes include source candidates that have not been deployed or live-enforcement-tested; check the [support matrix](features.md), not just tool registration.
+
+For host-confirmed writes or capture, retain the `sites` object and configure persistent paths:
 
 ```json
 {
-  "writes_enabled": false,
-  "vpn_writes_enabled": true,
-  "vpn_confirmation_mode": "host_confirmed",
-  "vpn_target_policy": "approval_bound",
-  "capture_enabled": true,
   "approval_consumed_directory": "/approval-consumed",
   "audit_file": "/audit/actions.jsonl"
 }
 ```
 
-Retain the `sites` object. Set each site's `management_revision` only to the actually reviewed revision in [firmware contracts](vpn-firmware-contract.md); never spoof the revision to bypass checks. Add `--vpn-write-catalog` to the HTTP/stdio command. Mount separate persistent ledger and audit directories read-write; they must be private, non-symlink directories owned by UID10001, mode0700. Mount config/keys/known_hosts/token read-only. This selects47 tools; omit capture for43. A lost consumption ledger compromises replay protection; back it up with the runtime and never clear it to retry an action.
+These fields are additions to your config, not a complete config file. Mount the ledger and audit directories read-write; they must be private, non-symlink directories owned by container UID10001, mode0700. Keep config, keys, known_hosts and bearer read-only. Never clear the ledger to retry a change. No external approval inbox or issuer mount is needed in host-confirmed mode.
 
-No external approval inbox or issuer is mounted in host-confirmed mode. The host must show the preview and obtain exact confirmation; the server does not attest the human reply. See [trust model](host-confirmed-vpn.md).
+For managed writes, set each site's `management_revision` only to its actually reviewed [firmware contract](vpn-firmware-contract.md). Install reviewed restricted SSH helpers for the selected operations before enabling access; see [router command restrictions](writes.md#restricted-router-key). Do not spoof a revision, broaden sudo or reuse a VPN-only gate for general writes. Registered VPN import inputs need their own protected setup.
 
-### Restricted router key
-
-An unrestricted `pi` key remains powerful. Use the reviewed `scripts/vpn_only_ssh_gate.py` or capture extension `scripts/capture_ssh_gate.py` as a forced command for the dedicated key. These are templates, not automatic installers. Compute SHA256 of the exact release `src/firewalla_mcp/remote.py`, capture helper where enabled, and the import zipapp produced by `scripts/build_vpn_import_helper.py`. Replace only the digest placeholders in the gate. Unknown pins fail closed.
-
-Install reviewed gate/import artifacts in the account's mode0700 `.ssh` directory, owner `pi`, preserving existing files and keeping rollback copies; import helper mode0600. Attach a fixed forced-command path with `restrict` to only the dedicated public-key entry in `authorized_keys`. Preserve unrelated keys and verify the public-key fingerprint. Review source and operation allowlist before enabling it. Never allow arbitrary Python source or shell. Capture permits only the pinned helper under a fixed timeout and existing noninteractive sudo; verify `/usr/bin/tcpdump`. No sudo grants are supplied by this project.
-
-Import requires additional protected registered inputs and policy described in [VPN import contract](vpn-mcp-writes.md). Merely enabling the catalog does not upload/register archives or authorize copying credentials. General forwarding/kernel/device-control permissions are excluded from the VPN/capture gate. The separate `scripts/managed_ssh_gate.py` template can permit reviewed device/app/DNS operations only after deployment review; it does not permit temporary kernel writes or unreviewed DoH/NTP.
+The host must enforce human confirmation; the server cannot attest the reply. Review the [common approval workflow and per-tool exceptions](approvals.md) before enabling mutations. Detailed operation examples belong in [examples](examples.md), [VPN operations](vpn-mcp-writes.md), [managed writes](managed-writes.md), [forwarding/plans](persistent-forwarding.md) and [capture](traffic-capture.md).
 
 ## 4. Acceptance and gateway
 
-An MCP client should initialize, list tools, verify the expected count and schemas, call `list_boxes`, then `system_health` on each box. `/healthz` requires the bearer and checks the process only. Verify missing/bad bearer and invalid Origin rejection. Preview a synthetic scope if desired; do not apply or start capture as an installation test. Run fake cleanup/protocol tests in isolated containers. Test an actual capture only after its separate scope confirmation.
+An MCP client should initialize, list tools, verify the expected count and schemas, call `list_boxes`, then `system_health` on each box. `/healthz` requires the bearer and checks the process only. Verify missing/bad bearer and invalid Origin rejection. Use a non-mutating preview if desired; do not invoke the side-effecting import preview, apply a change or start capture as an installation test. Run fake cleanup/protocol tests in isolated containers. Test an actual capture only after its separate scope confirmation.
 
-Use [ContextForge/Okta](contextforge-okta.md). Update the same virtual server's tool associations after gateway refresh; verify gateway schemas as well as direct backend schemas. ChatGPT may require **Manage → Manage app → Refresh tools**. Retain the existing OAuth client and endpoint.
+Use [Gateway/OAuth](authentication.md). Update the same virtual server's tool associations after gateway refresh; verify gateway schemas as well as direct backend schemas. ChatGPT may require **Manage → Manage app → Refresh tools**. Retain the existing OAuth client and endpoint.
 
 ## 5. Upgrade and rollback
 

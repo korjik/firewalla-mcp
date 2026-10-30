@@ -58,7 +58,7 @@ on both appliances, invalid-input rejection, writes unavailable and unauthentica
 HTTP 401. Existing gateway/server associations were extended by exactly two tools,
 with existing IDs and OAuth configuration preserved. Gateway refresh initially
 omitted new output schemas; a second refresh updated those two records. The actual
-ContextForge model-facing serializer now advertises all 36 output schemas, and
+MCP gateway model-facing serializer now advertises all 36 output schemas, and
 its invocation path returned structured results for both tools on both routers.
 A new interactive OAuth-consent round trip was not performed; the integration was
 not recreated. ChatGPT may require Refresh tools on the existing app snapshot.

@@ -4,7 +4,7 @@
 
 `capture-v1` was built and deployed on an amd64 NAS. It exposes47 tools:36 read/inspection, seven VPN methods and four capture methods. Gold Plus/x86_64 and Gold SE/aarch64 both passed actual MCP/internal OpenSSH health reads. Strict known-host checks remain enabled.
 
-Verified: authenticated Streamable HTTP initialize/list/call; matching ContextForge tool schemas/associations; unchanged existing gateway/OAuth identity; rejected missing/bad bearer and invalid Origin; rejected unknown apply/capture plans and capture limits. Actual-image network-none fake-capture timeout/cancellation checks verified child cleanup. No real capture, probe or VPN/network mutation was used for deployment acceptance.
+Verified: authenticated Streamable HTTP initialize/list/call; matching MCP gateway tool schemas/associations; unchanged existing gateway/OAuth identity; rejected missing/bad bearer and invalid Origin; rejected unknown apply/capture plans and capture limits. Actual-image network-none fake-capture timeout/cancellation checks verified child cleanup. No real capture, probe or VPN/network mutation was used for deployment acceptance.
 
 The last deployed capture release had629 passing local tests. Subsequent local PR preparation is a separate candidate and must report its final count/build checks in PR evidence, not imply deployment. ARM container execution remains untested.
 
