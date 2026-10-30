@@ -1,36 +1,23 @@
-# Feature catalog and evidence
+# Feature support and evidence
 
-Status as of 2026-10-29. Two owner-authorized appliances were probed through an existing SSH connector with the actual dependency-free helper. Only status summaries were retained; no private output is included here. This verifies helper behavior, not this server's local OpenSSH transport to those appliances. No full firmware compatibility range is claimed.
+The [generated tool reference](tool-reference.md) is the complete schema catalog. Default read catalog36, VPN43, VPN+capture47, combined+capture61. Counts describe registration, not execution authorization or firmware compatibility.
 
-| Area | Implemented | Validation / limits | Future or unsupported |
-| --- | --- | --- | --- |
-| System health | Uptime, load, selected memory counters | Mock and two-appliance helper tests passed | Disk/temperature/service health |
-| Interfaces and VLANs | `ip -j -d link`, VLAN ID projection | Two appliances passed | Detailed bridge/switch topology |
-| Addresses/routes/neighbors/rules | Bounded `ip -j` selected fields | All five network modes passed on both appliances | Full mark/source-aware route simulation |
-| Devices | Bounded MAC scan and known MAC → IPv4 lookup | Scan schema validated separately; specific-device details mocked | Device names and richer safe projections |
-| VPN client status | Selected interface status and addresses | Network adapter live-tested; selected VPN tool not live-tested | Provider health, profile inventory, secrets-free profile adapter |
-| Device VPN routing | Explicit per-device policy field reader; unsupported effective result in diagnosis | Policy parser mocked; no inheritance/mark resolution asserted | Device/group/network/global policy precedence |
-| Firewall | IPv4 filter/nat/mangle counters and basic matches | nat passed on both; filter passed on one and unsupported on one; mangle not live-tested | Full match semantics, IPv6, nftables |
-| Ipsets | Names only | Passed on both | Member queries with explicit bounds |
-| Port forwarding | Configured sanitized mappings | Parsed successfully on both; range and redaction mocks passed | Effective kernel NAT translations, schedule evaluation, VPN provider assignments |
-| DNS | Validated name, bounded resolver lookup | Injection mocks; not live-tested | Per-server DNS tests |
-| TCP | One allowlisted connect, no application payload | Success/failure mocked; no new live network probe performed | UDP, application handshake identity |
-| Live connections/NAT | Socket count and source-scoped conntrack tuples | Count and empty loopback query passed on both; populated tuple parser mocked | Full NAT semantic evaluation |
-| Central diagnosis | Separate evidence and conservative verdict | Mock independent success despite local failure | Exact mapping/policy proof and provider adapter |
-| Traffic and alarms | Cumulative interface counters and active alarm count in a bounded score window | Both helper adapters passed on both appliances | Per-device history, descriptions, alarm record fields |
-| Packet metadata | Not implemented | No capture performed | Explicit opt-in, packet/time cap, zero payload exposure |
-| Temporary kernel writes | Opt-in route/filter/DNAT additions and approved rollback | Approval mocks and isolated kernel tests; no appliance mutation | Persistent managed changes, device/VPN/maintenance writes |
+| Family | Implemented behavior | Evidence and limits |
+|---|---|---|
+| System/network/services | Uptime/load/memory, fixed unit status, bounded interface/VLAN/address/route/rule/neighbor reads | Actual MCP/internal SSH reads on Gold Plus and Gold SE; not complete topology |
+| Devices/People | Inventory, lookup, explicit People/group membership, names and empty groups | Bounded live projection and mocks; stored offline records and app counts can differ; never infer ownership from a name |
+| VPN inventory | Saved OpenVPN/WireGuard labels, types, endpoints, observed link state | Bounded live projection; other protocols unsupported; connectivity is not administrative intent or routing proof |
+| Rules/controls/apps | Paginated configured rules, scoped feature state, dynamic app IDs, schedules | Read tests and mocks; inheritance/effective enforcement may remain unknown; stage tools never apply |
+| Flows/alarms/usage | Bounded per-device flows, page summaries, active alarm samples/counts, interface counters | Retention, mutable paging and domain attribution incomplete; no full archival analytics or sensitive behavior inference |
+| DNS/TCP/NAT diagnosis | Resolver lookup, allowlisted TCP probe, configured mappings, counters, scoped conntrack | Each observation has its own vantage/time; local timeout does not prove global closure; UDP/provider assignment not inferred |
+| Capture | Preview/start/status/cancel; scoped metadata; 15seconds/100packets maximum | Deployed permission/schema, fake-process cleanup and parser tests; no real capture yet |
+| VPN lifecycle/switch | Native existing-profile start/stop and explicit device-profile switch; exact plan/state binding | Current installed source contracts reviewed; deployed methods and read/negative checks; no live mutation in deployment tests |
+| VPN import | Registered router-local archive, router-local credential clone, fresh IDs, inactive/unassigned publication | Transaction mocks and one bounded one-off import; reusable MCP mutation not live-tested; maintenance window required, no atomic FireMain stop guarantee |
+| Persistent VPN NAT | Single mapping, bounded TCP/UDP plan; owned conditional single-map rollback | Current source pins and realistic mocks; local candidate, not deployed or live-enforcement/restart tested |
+| Mixed VPN plan | Start → device switch → 1–2 forwards, expected own-state transitions | Local mocks cover drift/replay/partial outcomes; not atomic; no automatic resume/compensation or exposed mixed-plan inverse |
+| Temporary kernel route/filter/DNAT | Scoped additions and conditional removal | Mock and disposable isolated-kernel tests; not Firewalla-managed persistence; not enabled by current VPN/capture gate |
+| Device/app/DNS/scoped service writes | Tri-state overrides, new/scheduled block rules, DNS answer rules, scoped DNS/NTP | Five installed policy/control dependencies reviewed and pinned on both revisions; Ad Block/Safe Search/Unbound and rules/DNS supported in source. DoH/NTP remain blocked on these revisions. Not deployed or live-enforcement tested |
+| Permanent routes, arbitrary rule CRUD | No validated adapter | Unsupported; temporary route tools are not a substitute |
+| RADIUS, users/time quotas, arbitrary maintenance | No safe complete management contract | Unsupported; no enrollment, restart/reboot, arbitrary shell or credential-export tool |
 
-The helper requires Python 3 and `timeout`; adapters probe utility availability and validate schemas on each call. Missing tools or unfamiliar/oversized output remain unsupported. Utility presence alone is not evidence of adapter support. Read adapters validate data shapes. Experimental managed write adapters additionally require an exact reviewed source commit and clean tracked tree; this does not certify runtime enforcement.
-
-## Source research
-
-Reviewed official [Firewalla source](https://github.com/firewalla/firewalla/tree/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396) (snapshot examined 2026-10-29):
-
-- [`extension/portforward/portforward.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/extension/portforward/portforward.js) stores JSON in `extension.portforward.config` with a `maps` array, protocol, dport, toIP, toPort and enabled fields. It also contains scheduling and application logic. Reading a stored entry alone cannot prove its effective kernel behavior.
-- [`net2/Host.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/net2/Host.js) uses `host:mac:` records and VPN policy/profile references. This server reads only the known IPv4 field, not entire device or VPN hashes.
-- [`api/routes/me.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/api/routes/me.js) has development-gated behavior. Source routes do not establish production/beta runtime support. This server never enables internal HTTP routes. Optional managed writes require the already-running loopback encipher route; development-only routes remain unused.
-
-The MCP integration uses the [official Python SDK](https://github.com/modelcontextprotocol/python-sdk), pinned to the compatible 1.x API through the dependency lock. Upgrading to 2.x requires an explicit migration and protocol tests.
-
-Additional source review: [`alarm/AlarmManager2.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/alarm/AlarmManager2.js) uses the `alarm_active` sorted set for score-window counts. Only TYPE and ZCOUNT are used; no alarm record content is read. [`vpn/VpnManager.js`](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/vpn/VpnManager.js) refers to OpenVPN systemd instances; a fixed unit status is only an observation, not comprehensive server support.
+`write_capabilities.configured_contracts` reports revision eligibility per configured box. It explicitly does not certify installed source, gate permissions or live behavior. Preview performs those checks. Failure/unknown is never an empty configuration or proof of enforcement.

@@ -13,7 +13,7 @@ from test_managed_extensions import lifecycle,LIFE
 @pytest.fixture
 def upstream(monkeypatch):
     state={'policies':{},'calls':[],'race':False,'reactivated':False}
-    monkeypatch.setattr(remote,'management_guard',lambda revision:None)
+    monkeypatch.setattr(remote,'management_guard',lambda revision,*args:None)
     monkeypatch.setattr(remote,'run',lambda argv:'1' if 'EXISTS' in argv else pytest.fail(str(argv)))
     def constructor(value):
         value=copy.deepcopy(value)

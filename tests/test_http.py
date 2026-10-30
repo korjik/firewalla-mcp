@@ -28,9 +28,11 @@ def test_real_http_mcp_protocol(app):
         headers['MCP-Protocol-Version']=result.json()['result']['protocolVersion']
         result=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}})
         names={t['name'] for t in result.json()['result']['tools']}
-        assert len(names)==34 and 'apply_change' not in names
+        assert len(names)==36 and 'apply_change' not in names
+        assert all(t.get('outputSchema',{}).get('type')=='object' for t in result.json()['result']['tools'])
         result=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'list_boxes','arguments':{}}})
         assert result.status_code==200 and not result.json()['result'].get('isError',False)
+        assert result.json()['result']['structuredContent']=={'boxes':[],'aliases':{}}
         result=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':4,'method':'tools/call','params':{'name':'apply_change','arguments':{'plan_id':'a'*32}}})
         assert result.json()['result']['isError']
 

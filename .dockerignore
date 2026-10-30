@@ -7,3 +7,5 @@
 src/**/__pycache__
 !tests
 !tests/Dockerfile.kernel
+
+!Dockerfile.legacy

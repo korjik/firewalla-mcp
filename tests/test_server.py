@@ -109,8 +109,8 @@ async def test_transport_timeout_kills(monkeypatch,config):
 
 async def test_catalog(config):
     tools=await build_server(config).list_tools()
-    assert len(tools)==46
-    assert all(t.annotations.readOnlyHint for t in tools if t.name != "apply_change")
+    assert len(tools)==52
+    assert all(t.annotations.readOnlyHint for t in tools if t.name not in ("apply_change","apply_network_plan"))
     assert next(t for t in tools if t.name == "apply_change").annotations.destructiveHint
     assert not any("shell" in t.name for t in tools)
 
@@ -170,9 +170,8 @@ def test_alarm_fields_only(monkeypatch):
 
 def test_policy_selected_fields(monkeypatch):
     def read(argv):
-        if 'TYPE' in argv:return 'zset'
-        if 'ZREVRANGE' in argv:return '42\n'
-        return 'ip\nblock\n1\ninbound\n'
+        assert 'HGETALL' not in argv[3]
+        return json.dumps({'total':1,'version':'a'*40,'rows':[{'id':'42','values':{'type':'ip','action':'block','disabled':'1','direction':'inbound'}}]})
     monkeypatch.setattr(remote,'run',read)
     result=remote.dispatch('policy_summaries',{'limit':3})
     assert result['records'][0]['disabled'] is True

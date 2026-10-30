@@ -249,6 +249,7 @@ def write_operation(args):
     if mode=="rollback":
         argv[3 if spec["kind"]=="route" else 5]="del" if spec["kind"]=="route" else "-D"
     try:
+        if "expires_at" in args:require_action_deadline(args)
         run(["sudo","-n"]+argv)
     except (Unsupported, OSError, subprocess.TimeoutExpired):
         return {"outcome":"uncertain","changed":None,"reason":"Mutation command failed or timed out. Inspect actual state; do not retry automatically."}
@@ -325,6 +326,160 @@ def app_catalog(args):
         entries.append({"id":atom(identifier),"declared_features":projected,
                         "ordinary_block_target":"TLX-fw-"+atom(identifier) if isinstance(features,dict) and features.get("acl") is True else None})
     return {"apps":entries[:256],"truncated":len(entries)>256,"note":"Cached firmware app feature declarations only. Usage-tracked apps are not necessarily blockable. No cloud request performed; beta/model/firmware support may differ. No app labels or domains inferred."}
+
+
+# Read-only bounded Redis batches. No HGETALL, credentials, or management writes.
+RULE_FIELDS = ['type','target','action','disabled','direction','scope','tag','localPort','remotePort',
+               'protocol','cronTime','duration','expire','description','name','matchAppId','timezone','timestamp']
+RULE_PAGE_LUA = """
+local typ=redis.call('TYPE','policy_active').ok
+if typ~='zset' then return cjson.encode({unsupported=true}) end
+local total=redis.call('ZCARD','policy_active')
+if total>2000 then return cjson.encode({too_many=true,total=total}) end
+local ids=redis.call('ZREVRANGE','policy_active',0,-1)
+local version=redis.sha1hex(cjson.encode(ids))
+local offset=tonumber(ARGV[1]); local count=tonumber(ARGV[2]); local fields=cjson.decode(ARGV[3])
+local rows={}; local bytes=0
+for i=offset+1,math.min(#ids,offset+count) do
+ local id=ids[i]; if not string.match(id,'^%d+$') or #id>20 then return cjson.encode({unsupported=true}) end
+ local row={id=id,values={}}
+ for _,f in ipairs(fields) do
+  local size=redis.call('HSTRLEN','policy:'..id,f)
+  if size>2048 then return cjson.encode({oversized=true}) end
+  bytes=bytes+size; if bytes>70000 then return cjson.encode({oversized=true}) end
+  row.values[f]=redis.call('HGET','policy:'..id,f)
+ end
+ table.insert(rows,row)
+end
+return cjson.encode({total=total,version=version,rows=rows})
+"""
+RULE_NAMES_LUA = """
+local result={};local bytes=0
+for _,key in ipairs(KEYS) do
+ local row={}
+ for _,field in ipairs({'name','bname','intf'}) do
+  if redis.call('HSTRLEN',key,field)>256 then return cjson.encode({oversized=true}) end
+  local value=redis.call('HGET',key,field);if value then bytes=bytes+#value end
+  if bytes>16000 then return cjson.encode({oversized=true}) end
+  row[field]=value
+ end
+ result[key]=row
+end
+return cjson.encode(result)
+"""
+
+
+def rule_text(value, size=256):
+    if value is False or value is None or value == '':
+        return None
+    if not isinstance(value,str) or len(value)>size or any(ord(c)<32 for c in value):
+        return None
+    return value
+
+
+def rule_list(value):
+    if value in (None,False,''):
+        return []
+    try:
+        rows=json.loads(value)
+    except (ValueError,TypeError):
+        return None
+    if not isinstance(rows,list) or len(rows)>32 or not all(rule_text(v,128) for v in rows):
+        return None
+    return rows
+
+
+def rule_page(args):
+    import hashlib
+    started=time.monotonic()
+    limit=args.get('limit',5); cursor=args.get('cursor','0')
+    enabled=args.get('enabled'); action=args.get('action'); device=args.get('device'); category=args.get('category')
+    if type(limit) is not int or not 1<=limit<=50 or enabled is not None and type(enabled) is not bool:
+        raise ValueError('rule page')
+    if action not in (None,'allow','block','route','match','alarm','qos','snat'):
+        raise ValueError('action filter')
+    if device is not None:
+        if not isinstance(device,str) or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',device):
+            raise ValueError('device filter must be MAC')
+        device=device.upper()
+    if category is not None and (not isinstance(category,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}',category)):
+        raise ValueError('category filter')
+    signature=hashlib.sha256(json.dumps([enabled,action,device,category],separators=(',',':')).encode()).hexdigest()[:16]
+    offset=0; version=None
+    if cursor!='0':
+        if not isinstance(cursor,str) or not re.fullmatch(r'[0-9]{1,4}:[a-f0-9]{40}:[a-f0-9]{16}',cursor):
+            raise ValueError('cursor')
+        pos,version,bound=cursor.split(':');offset=int(pos)
+        if offset>2000 or bound!=signature:
+            raise ValueError('cursor filter mismatch')
+    raw=json.loads(run(['redis-cli','--raw','EVAL',RULE_PAGE_LUA,'0',str(offset),str(limit),json.dumps(RULE_FIELDS)]))
+    if not isinstance(raw,dict) or not all(k in raw for k in ('total','version','rows')):
+        raise Unsupported('rule index exceeds bound or selected-field schema unavailable')
+    if version and version!=raw['version']:
+        return {'records':[],'total':raw['total'],'total_semantics':'unfiltered_index_count','has_more':True,
+                'cursor':None,'next_cursor':None,'restart_required':True,'reason':'Rule index changed; restart at cursor 0'}
+    rows=raw['rows'] or []
+    if not isinstance(rows,list) or len(rows)>limit:
+        raise Unsupported('rule page schema')
+    projected=[]; name_keys=set(); missing=0
+    for entry in rows:
+        p=entry['values']
+        if not p.get('type'):
+            missing+=1;continue
+        disabled=p.get('disabled')
+        if disabled in (False,None,'','0','false'):
+            state='enabled'; disabled_value=False
+        elif disabled in ('1','true'):
+            state='disabled'; disabled_value=True
+        else:
+            state='unknown'; disabled_value=None
+        scope=rule_list(p.get('scope')); tags=rule_list(p.get('tag'))
+        if enabled is not None and (disabled_value is None or enabled==disabled_value):continue
+        if action is not None and p.get('action')!=action:continue
+        if category is not None and not (p.get('type')=='category' and p.get('target')==category):continue
+        if device is not None and not (scope is not None and device in [s.upper() for s in scope] or p.get('type')=='mac' and str(p.get('target','')).upper()==device):continue
+        if p.get('type')=='mac' and isinstance(p.get('target'),str) and re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',p['target']) and scope is not None:
+            scope=list(dict.fromkeys(scope+[p['target'].upper()]))
+        scopes=[]
+        if scope is None or tags is None:
+            scopes.append({'kind':'unknown','id':None,'name':None})
+        for value in scope or []:
+            if re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',value):
+                value=value.upper(); key='host:mac:'+value;name_keys.add(key)
+                scopes.append({'kind':'device','id':value,'_keys':[key]})
+            else:scopes.append({'kind':'unknown','id':rule_text(value,128),'name':None})
+        for value in tags or []:
+            if value.startswith('tag:') and re.fullmatch(r'[0-9]{1,20}',value[4:]):
+                keys=[prefix+value[4:] for prefix in ('tag:uid:','deviceTag:uid:','userTag:uid:','ssidTag:uid:')]
+                name_keys.update(keys);scopes.append({'kind':'group','id':value[4:],'_keys':keys})
+            elif value.startswith('intf:') and re.fullmatch(r'[A-Za-z0-9_-]{1,64}',value[5:]):
+                key='network:uuid:'+value[5:];name_keys.add(key)
+                scopes.append({'kind':'network','id':value[5:],'_keys':[key]})
+            else:scopes.append({'kind':'unknown','id':rule_text(value,128),'name':None})
+        if not scopes:scopes=[{'kind':'global','id':None,'name':'All devices (configured scope)'}]
+        item={k:rule_text(p.get(k)) for k in ('type','target','action','direction','localPort','remotePort','protocol','cronTime','duration','expire','description','name','matchAppId','timezone','timestamp')}
+        item.update({'id':entry['id'],'disabled':disabled_value,'configured_state':state,'scopes':scopes,
+                     'effective_state':'unknown','state_explanation':'Stored rule setting only; schedules, expiry, exceptions and inherited applicability are not evaluated.'})
+        if disabled in (False,None,''):item['state_explanation']='Missing disabled flag defaults to enabled in reviewed Firewalla Policy.isDisabled; enforcement is not verified.'
+        item['app_id']=item['matchAppId'] or (item['target'][7:] if item['type']=='category' and item['target'] and item['target'].startswith('TLX-fw-') else None)
+        projected.append(item)
+    if len(name_keys)>128:raise Unsupported('name resolution bound; narrow page')
+    names=json.loads(run(['redis-cli','--raw','EVAL',RULE_NAMES_LUA,str(len(name_keys))]+sorted(name_keys))) if name_keys else {}
+    if not isinstance(names,dict) or names.get('oversized'):raise Unsupported('name metadata bound')
+    for item in projected:
+        for scope in item['scopes']:
+            keys=scope.pop('_keys',[])
+            if keys:
+                candidates=[rule_text(names.get(key,{}).get(field)) for key in keys for field in ('name','bname','intf')]
+                scope['name']=next((v for v in candidates if v),None)
+                scope['name_resolution']='resolved' if scope['name'] else 'unavailable'
+    next_offset=offset+len(rows); more=next_offset<raw['total']
+    token=f"{next_offset}:{raw['version']}:{signature}" if more else None
+    return {'records':projected,'total':raw['total'],'total_semantics':'unfiltered_index_count',
+            'returned':len(projected),'scanned':len(rows),'skipped_missing':missing,'has_more':more,
+            'may_have_more':more,'cursor':token,'next_cursor':token,'restart_required':False,
+            'matched_total':None,'elapsed_ms':round((time.monotonic()-started)*1000,2),
+            'note':'Cursor advances scanned index entries, including filtered-out rules. Follow empty pages while has_more. Index changes require restart; field changes are not snapshot-isolated. Device filter matches explicit scope only; inherited group/network/global applicability is not evaluated. No enforcement claim.'}
 
 
 def control_rules(args):
@@ -544,6 +699,80 @@ def service_features(feature):
 # Independently implemented protocol adapter; reviewed upstream revision only.
 MANAGEMENT_REVISION = '4b4d9fecbd9fd56613ffba91a7c88b26f1b67396'
 
+# Two release commits with the identical reviewed source tree. VPN operations only.
+VPN_MANAGEMENT_REVISIONS = ('173ac36dccb5239a5195a5b4e64d20cb1b618a91',
+                            'a92caef41689e5d4c929207c003b1a667f39ece2')
+VPN_SOURCE_TREE = '85d99a2bc15d97cc4523d00d4a2f67263a0b22a1'
+VPN_SOURCE_HASHES = {'controllers/netbot.js': 'd7ae7676389d54fff71c0dadf83540a8cd454a8d1dca9336fa8d8b83cc7c9871', 'api/routes/encipher.js': '719469781ebbd9096981594d00bc40f1ae6f9f90366f615a1a317cb1c1a8df3a', 'api/app-local.js': '9a65a851ed8a72142f8ce2379e1e08226aeb62c58a6ed0311f8ea15c91eb595f', 'net2/Host.js': 'c5656272ffe1fc82bab90f6ba556b0b257d2deabaa680b7d4c5086407cf8dbff', 'net2/HostManager.js': '8e01724086e36e10c0e182449d4edefba7577b6d18666a7049752997af0c2771', 'net2/Monitorable.js': '69bf2bcf8e0895e4cc2a515ad53bcf0e11dcd0986eb87fbcb897a6feb527bc77', 'net2/PolicyManager.js': '49f5c1de644f09c2bd3700a06acdc8ff8aa158a7ffb2c623cba461aeac625b2a', 'extension/vpnclient/VPNClient.js': 'a08e6c378758504ea57a96136ea1d3d35fc2634aef299b8b5d40de1e0fff52c1', 'extension/vpnclient/OpenVPNClient.js': 'bf3bca904c057949f453992c3c8f004ead43bb6dd968dab63e0f94b62e84efb6', 'extension/vpnclient/WGVPNClient.js': 'd13525533885603985f503994b3d4fc555cb02eafb7807a97c7be2d71a5615f8', 'util/i18n.js': 'c8b93144f1b3bbc79a07198d44f17e6c948fa8d1de275dc2d75c91678935069e'}
+VPN_SAFETY_DEFAULTS = {'strictVPN':False, 'routeDNS':True,
+                       'overrideDefaultRoute':True, 'c2sSNATDisabled':False}
+
+
+def contract_file(root, relative, maximum=2097152):
+    import stat
+    path = os.path.join(root, relative)
+    parent = os.path.dirname(path)
+    while parent != '/':
+        if not stat.S_ISDIR(os.lstat(parent).st_mode):
+            raise Unsupported('source ancestor is not a real directory')
+        parent = os.path.dirname(parent)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
+            raise Unsupported('source file type or size changed')
+        data = os.read(fd, maximum + 1)
+        if len(data) != info.st_size or len(data) > maximum:
+            raise Unsupported('source file changed while reading')
+        return data
+    finally:
+        os.close(fd)
+
+
+def vpn_source_guard(revision, root='/home/pi/firewalla', runner=None):
+    """No management call, credentials or mutation; exact reviewed source check."""
+    import hashlib
+    runner = runner or run
+    if revision not in VPN_MANAGEMENT_REVISIONS:
+        raise Unsupported('unreviewed VPN revision')
+    if runner(['git','-C',root,'rev-parse','HEAD']).strip() != revision:
+        raise Unsupported('installed source revision mismatch')
+    if runner(['git','-C',root,'rev-parse','HEAD^{tree}']).strip() != VPN_SOURCE_TREE:
+        raise Unsupported('installed source tree mismatch')
+    changed = runner(['git','-C',root,'status','--porcelain','-z','--untracked-files=no'])
+    rows = [row for row in changed.split('\0') if row]
+    if any(row not in (' M locales/en.json','M  locales/en.json','MM locales/en.json') for row in rows):
+        raise Unsupported('modified executable or unreviewed source')
+    for name, expected in VPN_SOURCE_HASHES.items():
+        if hashlib.sha256(contract_file(root,name)).hexdigest() != expected:
+            raise Unsupported('reviewed VPN source digest mismatch')
+    # i18n consumes this only as translation data; no policy/control value comes
+    # from it. Permit string dictionaries, not arbitrary files or symlinks.
+    if rows:
+        value = json.loads(contract_file(root,'locales/en.json'))
+        def strings(v, depth=0):
+            return depth < 12 and (isinstance(v,str) or isinstance(v,dict) and
+                all(isinstance(k,str) and strings(x,depth+1) for k,x in v.items()))
+        if not isinstance(value,dict) or not strings(value):
+            raise Unsupported('locale edit is not a translation dictionary')
+    return {'revision':revision,'tree':VPN_SOURCE_TREE,'contract_files_verified':len(VPN_SOURCE_HASHES),
+            'translation_only_edit':bool(rows)}
+
+
+
+# Reviewed installed policy/control contracts; DoH/NTP implementations excluded.
+POLICY_SOURCE_HASHES = {'alarm/Policy.js': 'd05901cc617be04bdda3a5b225386c04d597a28313449d2a67afa68aea0a6677', 'alarm/PolicyManager2.js': 'd1d290f38c12ca5b2a2a94e0c05f3d5cef69c7018fd92dbc8e6e76fe8f40a27f', 'sensor/AdblockPlugin.js': '81a5e3c3fa68d4d31af674394ca6bd5c8608c6ce22b0dd65756994e259082667', 'sensor/SafeSearchPlugin.js': 'a60f7e208b4eeb62d67ae72f4ed6990f7ec2c7cfc4c67f2319c12e062897e1d7', 'sensor/UnboundPlugin.js': '2e2b57900d207c46579e03e6c97bc687a30919c4dd5313d2a1143ec6d3581d55'}
+POLICY_FEATURES = ('adblock','safeSearch','unbound')
+
+
+def policy_source_guard(revision, root='/home/pi/firewalla', runner=None):
+    import hashlib
+    result = vpn_source_guard(revision, root, runner)
+    for name, expected in POLICY_SOURCE_HASHES.items():
+        if hashlib.sha256(contract_file(root,name)).hexdigest() != expected:
+            raise Unsupported('reviewed policy source digest mismatch')
+    return {**result, 'policy_contract_files_verified':len(POLICY_SOURCE_HASHES)}
+
 
 def canonical_rule_ip(value):
     if not isinstance(value,str) or '%' in value or any(c.isspace() or ord(c)<32 or ord(c)==127 for c in value):
@@ -578,9 +807,290 @@ def managed_rule_matches(row,desired,spec,disabled):
     return matched
 
 
+# Independently implemented adapter for the reviewed FireMain message contract.
+FORWARD_SOURCE_HASHES = {
+    'extension/portforward/portforward.js':'0db0a855be5d04a5110b949342d26b5f62db6d48b9b249110321f0c410958158',
+    'control/IptablesControl.js':'a6017d3f0d81cbb50d34fe7c835aa3a2dc284bd8d67d73f4587fd5582f74f772',
+    'net2/Iptables.js':'891e5af9244d1b73ddb8b381129a29df8954d93344d12376f0a2f63679530ee1',
+    'net2/MessageBus.js':'4388bfbaf52f6e96a622bb3030139e00c85f3740f2b9b1fa2ceb9f8a2cd6dc26',
+}
+
+
+def forward_digest(value):
+    import hashlib
+    return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+
+def forward_port_range(value):
+    if isinstance(value,bool):raise Unsupported('invalid existing mapping port')
+    text=str(value)
+    if not re.fullmatch(r'[0-9]{1,5}(?:[-:][0-9]{1,5})?',text):raise Unsupported('unrecognized existing mapping port')
+    parts=re.split('[-:]',text);lo=int(parts[0]);hi=int(parts[-1])
+    if not 1<=lo<=hi<=65535:raise Unsupported('invalid existing mapping range')
+    return lo,hi
+
+
+def forward_value(spec, state=True):
+    # Never send wildcards: native removePort/find matches more broadly with them.
+    return {'wanUUID':'VC:'+spec['profile'],'protocol':spec['protocol'],
+            'dport':str(spec['external_port']),'toPort':str(spec['destination_port']),
+            'toMac':spec['device'],'toIP':spec['destination_ip'],
+            '_type':'port_forward','enabled':True,'state':state,
+            'description':'mcp:'+spec['owner_token']}
+
+
+def forward_matches(row,spec):
+    desired=forward_value(spec)
+    return (all(row.get(k)==v for k,v in desired.items() if k not in ('dport','toPort'))
+            and forward_port_range(row.get('dport'))==(spec['external_port'],)*2
+            and forward_port_range(row.get('toPort'))==(spec['destination_port'],)*2
+            and row.get('active') is not False and not row.get('applyToAll') and not row.get('extIP'))
+
+
+def forward_ingress_guard(profile):
+    # Native shared NAT chain matches tunnel IP sets, not the ingress interface
+    # again. Overlapping tunnel addresses across clients would make selection
+    # ambiguous; reject rather than promise isolation the native rule lacks.
+    import shlex
+    selected='c_ip_'+profile[:13]+'_set4'
+    names=[v for v in run(['sudo','-n','ipset','list','-name']).splitlines() if re.fullmatch(r'c_ip_[A-Za-z0-9_]+_set4',v)]
+    if selected not in names or len(names)>32:raise Unsupported('VPN ingress set missing or inventory bound')
+    sets={}
+    for name in names:
+        addresses=[]
+        for line in run(['sudo','-n','ipset','save',name]).splitlines():
+            parts=shlex.split(line)
+            if parts and parts[0]=='add':
+                if len(parts)!=3 or parts[1]!=name:raise Unsupported('unsupported VPN self-address set shape')
+                addresses.append(str(ipaddress.IPv4Address(parts[2])))
+        if len(addresses)>32:raise Unsupported('VPN address set bound')
+        sets[name]=sorted(addresses)
+    if not sets[selected]:raise Unsupported('selected VPN has no observed tunnel address')
+    if any(set(sets[selected]) & set(values) for name,values in sets.items() if name!=selected):
+        raise Unsupported('overlapping VPN tunnel addresses; native shared NAT cannot guarantee profile isolation')
+    return forward_digest(sets)
+
+
+def forward_snapshot(spec, expected_policy_profile=None, defer_ingress=False):
+    raw=run(['redis-cli','--raw','GET','extension.portforward.config']).strip()
+    config=json.loads(raw) if raw else {'maps':[]}
+    if not isinstance(config,dict) or set(config)!={'maps'} or not isinstance(config['maps'],list) or len(config['maps'])>256:
+        raise Unsupported('mapping schema or bound')
+    maps=config['maps'];collisions=[];owned=[]
+    for row in maps:
+        if not isinstance(row,dict):raise Unsupported('mapping schema')
+        # A DMZ is a competing catch-all. A generic/default WAN forward does not
+        # necessarily cover VPN, but applyToAll or the selected VC does.
+        relevant=bool(row.get('applyToAll')) or row.get('wanUUID')=='VC:'+spec['profile'] or row.get('_type')=='dmz_host'
+        if relevant and row.get('protocol') not in (None,'','tcp','udp'):raise Unsupported('unrecognized mapping protocol')
+        if relevant and row.get('protocol') in (None,'',spec['protocol']):
+            lo,hi=forward_port_range(row['dport']) if row.get('dport') else (1,65535)
+            if lo<=spec['external_port']<=hi:collisions.append(row)
+        if row.get('description')=='mcp:'+spec['owner_token']:owned.append(row)
+    if len(owned)>1:raise Unsupported('ambiguous mapping ownership')
+    ip=run(['redis-cli','--raw','HGET','host:mac:'+spec['device'],'ipv4Addr']).strip()
+    if ip!=spec['destination_ip']:raise Unsupported('destination device/IP binding changed')
+    policy_raw=run(['redis-cli','--raw','HGET','policy:mac:'+spec['device'],'vpnClient']).strip()
+    policy=json.loads(policy_raw) if policy_raw else None
+    if not isinstance(policy,dict) or policy.get('state') is not True or policy.get('profileId')!=(expected_policy_profile or spec['profile']):
+        raise Unsupported('explicit device VPN policy must match selected profile; inherited routing unsupported')
+    safety,settings_hash=managed_vpn_safety(spec['profile'])
+    ingress_hash='deferred until declared VPN start' if defer_ingress else forward_ingress_guard(spec['profile'])
+    return {'maps':maps,'owned':owned,'collisions':collisions,
+            'fingerprint':forward_digest({'maps':maps,'ip':ip,'vpn_policy':policy,'settings':settings_hash,'ingress':ingress_hash}),
+            'present':bool(collisions),'field':{k:owned[0].get(k) for k in forward_value(spec)} if owned else None,
+            'environment_fingerprint':forward_digest({'ip':ip,'vpn_policy':policy,'settings':settings_hash,'ingress':ingress_hash}),
+            'scope':'Persistent FireMain VPN mapping only; no firewall allow, provider port, VPN routing or conntrack change'}
+
+
+def forward_kernel_evidence(spec):
+    import shlex
+    ipset='c_ip_'+spec['profile'][:13]+'_set4';interface='vpn_'+spec['profile']
+    def rules(chain):return [shlex.split(v) for v in run(['sudo','-n','iptables','-t','nat','-S',chain]).splitlines() if v.startswith('-A ')]
+    def has(row,flag,value):
+        return any(row[i:i+1]==[flag] and row[i+1:i+1+len(value)]==value for i in range(len(row)))
+    nat=any(has(r,'-p',[spec['protocol']]) and has(r,'--dport',[str(spec['external_port'])]) and
+            has(r,'--match-set',[ipset,'dst']) and has(r,'-j',['DNAT']) and
+            has(r,'--to-destination',[spec['destination_ip']+':'+str(spec['destination_port'])])
+            for r in rules('FW_PRERT_VC_PORT_FORWARD'))
+    ingress=any(has(r,'-i',[interface]) and has(r,'--match-set',[ipset,'dst']) and
+                has(r,'-j',['FW_PRERT_VC_PORT_FORWARD']) for r in rules('FW_PREROUTING_VC_EXT_IP'))
+    return {'nat_rule_observed':nat,'vpn_ingress_link_observed':ingress,
+            'return_routing':'configured matching device VPN policy; effective reply path unverified',
+            'firewall_acceptance':'not tested or changed','external_reachability':'not tested',
+            'conntrack':'existing flows not flushed; test a new independent external flow',
+            'restart_persistence':'native stored mapping is restored by FireMain startup; no restart/reboot tested'}
+
+
+def managed_forward(args):
+    spec=args['spec'];mode=args['mode'];context=args.get('context')
+    if context is not None and context!={'owner_token':spec['owner_token']}:
+        raise ValueError('mapping rollback ownership mismatch')
+    before=forward_snapshot(spec)
+    if mode=='preview':
+        return {k:before[k] for k in ('fingerprint','present','field','scope')}
+    if args.get('expected')!=before['fingerprint']:return {'outcome':'stale','changed':False}
+    if not time.time()<spec['maintenance_until']<=time.time()+600:raise ValueError('forward maintenance window expired')
+    if mode=='apply' and (before['collisions'] or before['owned']):return {'outcome':'stale','changed':False}
+    if mode=='rollback' and (len(before['owned'])!=1 or not forward_matches(before['owned'][0],spec) or len(before['collisions'])!=1):
+        return {'outcome':'stale','changed':False}
+    # Native queue has no compare-and-set. The approved maintenance window must
+    # exclude concurrent app/API mapping edits; do not claim atomic protection.
+    try:
+        require_action_deadline(args)
+        management_request('set','policy','0.0.0.0',{'portforward':forward_value(spec,mode=='apply')})
+        end=min(time.monotonic()+5,time.monotonic()+max(0,args['expires_at']-time.time()))
+        after=None
+        while time.monotonic()<end:
+            time.sleep(.25);after=forward_snapshot(spec)
+            if mode=='apply' and len(after['owned'])==1 and forward_matches(after['owned'][0],spec):break
+            if mode=='rollback' and not after['owned']:break
+        verified=after is not None and (len(after['owned'])==1 and forward_matches(after['owned'][0],spec) if mode=='apply' else not after['owned'])
+        if not verified:return {'outcome':'uncertain','changed':None,'reason':'Queued mapping not verified; do not retry or remove unknown entries'}
+        before_other=[r for r in before['maps'] if r.get('description')!='mcp:'+spec['owner_token']]
+        after_other=[r for r in after['maps'] if r.get('description')!='mcp:'+spec['owner_token']]
+        if forward_digest(before_other)!=forward_digest(after_other) or before['environment_fingerprint']!=after['environment_fingerprint']:
+            return {'outcome':'uncertain','changed':None,'reason':'Concurrent state change detected after submission; inspect without rollback'}
+        evidence=forward_kernel_evidence(spec)
+        kernel_verified=(evidence['nat_rule_observed'] and evidence['vpn_ingress_link_observed']) if mode=='apply' else not evidence['nat_rule_observed']
+        # Confirm configured state, separately reporting kernel evidence. Never
+        # call this effective reachability or firewall permission.
+        return {'outcome':('applied' if mode=='apply' else 'rolled_back') if kernel_verified else 'uncertain',
+                'verification':'stored_mapping_verified','evidence':evidence,
+                'context':{'owner_token':spec['owner_token']},
+                'state':{k:after[k] for k in ('fingerprint','present','field','scope')}}
+    except Exception:
+        return {'outcome':'uncertain','changed':None,'reason':'Queued operation may have executed; inspect before any further action'}
+
+
+def workflow_specs(spec):
+    required={'kind','device','destination_ip','expected_profile','destination_profile','vpn_type','forwards','maintenance_until'}
+    if not isinstance(spec,dict) or set(spec)!=required or spec['kind']!='vpn_workflow':raise ValueError('workflow shape')
+    lifecycle={'kind':'managed_lifecycle','profile':spec['destination_profile'],'vpn_type':spec['vpn_type'],'desired':'connect'}
+    switch={'kind':'managed_vpn','device':spec['device'],'expected_profile':spec['expected_profile'],'destination_profile':spec['destination_profile']}
+    validate_managed(lifecycle);validate_managed(switch)
+    if not isinstance(spec['forwards'],list) or not 1<=len(spec['forwards'])<=2:raise ValueError('one or two exact forwarding actions required')
+    forwards=[]
+    for row in spec['forwards']:
+        if not isinstance(row,dict) or set(row)!={'protocol','external_port','destination_port','owner_token'}:raise ValueError('workflow forward shape')
+        item=dict(kind='managed_forward',device=spec['device'],destination_ip=spec['destination_ip'],profile=spec['destination_profile'],maintenance_until=spec['maintenance_until'],**row)
+        validate_managed(item);forwards.append(item)
+    if len(forwards)==2:validate_managed({'kind':'managed_forward_batch','steps':forwards})
+    return [lifecycle,switch]+forwards
+
+
+def workflow_profile_version(profile):
+    # File identity/change metadata only: never read configs, keys or passwords.
+    # ctime detects ordinary replacement/in-place edits even if mtime is restored.
+    import stat
+    rows=[]
+    for folder,suffixes in (('ovpn_profile',('.ovpn','.settings','.userpass','.password')),('wg_profile',('.json','.settings'))):
+        parent='/home/pi/.firewalla/run/'+folder
+        if not os.path.isdir(parent):continue
+        if not stat.S_ISDIR(os.lstat(parent).st_mode):raise Unsupported('profile parent is not a real directory')
+        for suffix in suffixes:
+            path=parent+'/'+profile+suffix
+            try:info=os.lstat(path)
+            except FileNotFoundError:rows.append([folder,suffix,None]);continue
+            if not stat.S_ISREG(info.st_mode):raise Unsupported('profile input not regular')
+            rows.append([folder,suffix,info.st_ino,info.st_dev,info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_mode,info.st_uid,info.st_gid])
+    return forward_digest(rows)
+
+
+def workflow_state(args):
+    spec=args['spec'];steps=workflow_specs(spec)
+    management_guard(args.get('revision'),'managed_forward')
+    policy=managed_field_read(steps[1])
+    if policy['profileId'] not in (spec['expected_profile'],spec['destination_profile']):raise Unsupported('workflow device policy outside declared transition')
+    old,old_hash=managed_vpn_safety(spec['expected_profile']);new,new_hash=managed_vpn_safety(spec['destination_profile'])
+    if old!=new:raise Unsupported('workflow safety/DNS mismatch')
+    life=managed_lifecycle_state(steps[0])
+    snapshots=[forward_snapshot(step,expected_policy_profile=policy['profileId'],defer_ingress=True) for step in steps[2:]]
+    maps=snapshots[0]['maps'];tokens={s['owner_token']:i for i,s in enumerate(steps[2:])};owned=[];unrelated=[]
+    for row in maps:
+        token=str(row.get('description','')).removeprefix('mcp:')
+        if token in tokens:
+            index=tokens[token]
+            if index in owned or not forward_matches(row,steps[index+2]):raise Unsupported('workflow owned mapping changed')
+            owned.append(index)
+        else:unrelated.append(row)
+    # Existing/range/disabled conflicts are blockers unless they are exact earlier
+    # results from this immutable workflow. Later own additions are rejected by host.
+    for item in snapshots:
+        if any(row not in [r for r in maps if str(r.get('description','')).removeprefix('mcp:') in tokens] for row in item['collisions']):
+            raise Unsupported('workflow existing mapping conflict')
+    ip=run(['redis-cli','--raw','HGET','host:mac:'+spec['device'],'ipv4Addr']).strip()
+    return {'stable':forward_digest({'maps':unrelated,'ip':ip,'profiles':[old_hash,new_hash],
+                    'profile_file_versions':[workflow_profile_version(spec['expected_profile']),workflow_profile_version(spec['destination_profile'])]}),
+            'policy':policy,'lifecycle':life,'owned_forward_steps':sorted(owned),
+            'limits':'Observed connection only; no peer/provider reachability or effective device-route claim'}
+
+
+def managed_forward_batch(args):
+    steps=args['spec']['steps'];mode=args['mode']
+    if mode=='rollback':raise Unsupported('compound rollback requires separately reviewed reverse actions')
+    states=[forward_snapshot(step) for step in steps]
+    fingerprint=forward_digest([s['fingerprint'] for s in states])
+    if mode=='preview':
+        return {'fingerprint':fingerprint,'present':any(s['present'] for s in states),
+                'field':None,'scope':'Ordered persistent VPN mappings; not atomic; stop on first unverified step',
+                'rollback':'No batch automatic rollback; inspect completed mappings before a separate exact removal plan'}
+    if args.get('expected')!=fingerprint:return {'outcome':'stale','changed':False,'steps':[]}
+    if any(s['present'] for s in states):return {'outcome':'stale','changed':False,'steps':[]}
+    baseline=forward_digest(states[0]['maps']);environment=states[0]['environment_fingerprint'];results=[];completed=[]
+    for index,step in enumerate(steps):
+        try:current=forward_snapshot(step)
+        except Exception:return {'outcome':'partial' if results else 'stale','steps':results,'stopped_at':index,'reason':'precondition read failed; inspect before further action'}
+        # Only exact mappings created by earlier verified steps may differ from
+        # the initial snapshot. Never adopt arbitrary fresh state as approved.
+        own={s['owner_token']:s for s in completed};remaining=[];seen=set()
+        for row in current['maps']:
+            token=str(row.get('description','')).removeprefix('mcp:')
+            if token in own:
+                if token in seen or not forward_matches(row,own[token]):
+                    return {'outcome':'partial','steps':results,'stopped_at':index,'reason':'earlier step changed; inspect'}
+                seen.add(token)
+            else:remaining.append(row)
+        if seen!=set(own) or forward_digest(remaining)!=baseline or current['environment_fingerprint']!=environment:
+            return {'outcome':'partial' if results else 'stale','steps':results,'stopped_at':index,'reason':'unexpected state drift; inspect'}
+        try:
+            require_action_deadline(args)
+            result=managed_forward({'spec':step,'mode':'apply','expected':current['fingerprint'],'expires_at':args['expires_at']})
+        except Exception:
+            return {'outcome':'partial' if results else 'uncertain','steps':results,'stopped_at':index,'reason':'step interrupted or deadline elapsed; inspect before retry'}
+        results.append({'index':index,'result':result})
+        if result.get('outcome')!='applied':
+            return {'outcome':'partial' if index else result.get('outcome','uncertain'),'steps':results,'stopped_at':index,
+                    'resume':'No blind retry or rollback. Inspect the uncertain step; prepare a fresh plan for remaining actions.'}
+        completed.append(step)
+    return {'outcome':'applied','steps':results,'atomic':False,'rollback':'Separate verified removal plans only',
+            'resume':'Completed plan cannot be replayed'}
+
+
 def validate_managed(spec):
-    if not isinstance(spec, dict) or spec.get('kind') not in ('managed_feature', 'managed_rule', 'managed_vpn', 'managed_scoped', 'managed_lifecycle'):
+    if not isinstance(spec, dict) or spec.get('kind') not in ('managed_feature', 'managed_rule', 'managed_vpn', 'managed_scoped', 'managed_lifecycle', 'managed_forward', 'managed_forward_batch'):
         raise ValueError('managed kind')
+    if spec['kind']=='managed_forward_batch':
+        if set(spec)!={'kind','steps'} or not isinstance(spec['steps'],list) or not 2<=len(spec['steps'])<=4:raise ValueError('bounded forward plan required')
+        seen=set();owners=set();scope=None
+        for step in spec['steps']:
+            if not isinstance(step,dict) or step.get('kind')!='managed_forward':raise ValueError('unsupported compound step')
+            validate_managed(step)
+            current=(step['device'],step['destination_ip'],step['profile'],step['maintenance_until'])
+            if scope is not None and current!=scope:raise ValueError('compound forwards require same target/profile/window')
+            scope=current;key=(step['protocol'],step['external_port'])
+            if key in seen or step['owner_token'] in owners:raise ValueError('overlapping compound mapping')
+            seen.add(key);owners.add(step['owner_token'])
+        return spec
+    if spec['kind']=='managed_forward':
+        keys={'kind','profile','device','destination_ip','protocol','external_port','destination_port','owner_token','maintenance_until'}
+        if set(spec)!=keys or spec['protocol'] not in ('tcp','udp'):raise ValueError('forward arguments')
+        if not re.fullmatch(r'[A-Za-z0-9_]{1,10}',spec['profile']) or not re.fullmatch(r'[a-f0-9]{32}',spec['owner_token']):raise ValueError('forward profile/ownership')
+        if not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}',spec['device']):raise ValueError('forward device')
+        spec['destination_ip']=str(ipaddress.IPv4Address(spec['destination_ip']))
+        if any(type(spec[k]) is not int or not 1<=spec[k]<=65535 for k in ('external_port','destination_port')):raise ValueError('forward ports')
+        if type(spec['maintenance_until']) is not int:raise ValueError('maintenance window')
+        return spec
     if spec['kind']=='managed_lifecycle':
         if set(spec)!={'kind','profile','vpn_type','desired'} or spec['vpn_type'] not in ('openvpn','wireguard') or spec['desired'] not in ('connect','disconnect') or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,10}',spec['profile']):
             raise ValueError('lifecycle arguments')
@@ -672,7 +1182,24 @@ def management_request(command, item, target, value, want_pid=False, lifecycle=F
         connection.close()
 
 
-def management_guard(revision):
+def management_guard(revision, kind=None, feature=None):
+    if kind in ("managed_forward","managed_forward_batch") and revision not in VPN_MANAGEMENT_REVISIONS:
+        raise Unsupported("persistent forwarding requires its reviewed installed revision")
+    if revision in VPN_MANAGEMENT_REVISIONS:
+        if kind in ('managed_feature','managed_scoped') and feature not in POLICY_FEATURES:
+            raise Unsupported('feature implementation not reviewed for installed revision')
+        if kind in ('managed_feature','managed_scoped','managed_rule'):
+            policy_source_guard(revision)
+        elif kind in ('managed_lifecycle','managed_vpn','managed_forward','managed_forward_batch'):
+            vpn_source_guard(revision)
+        else:
+            raise Unsupported('operation not reviewed for installed revision')
+        if kind in ('managed_forward','managed_forward_batch'):
+            import hashlib
+            for name,expected in FORWARD_SOURCE_HASHES.items():
+                if hashlib.sha256(contract_file('/home/pi/firewalla',name)).hexdigest()!=expected:raise Unsupported('port forwarding source changed')
+        management_request('cmd','ping','0.0.0.0',{})
+        return
     if revision != MANAGEMENT_REVISION:
         raise Unsupported('unreviewed management revision')
     root = '/home/pi/firewalla'
@@ -746,8 +1273,8 @@ def managed_field_read(spec):
 
 def managed_rule_snapshot():
     # Reject large rule sets, avoid unbounded per-rule reads, and never return raw policies.
-    ids=run(['redis-cli','--raw','ZRANGE','policy_active','0','128']).splitlines()
-    if len(ids)>128 or any(not re.fullmatch(r'[0-9]{1,20}',p) for p in ids):
+    ids=run(['redis-cli','--raw','ZRANGE','policy_active','0','512']).splitlines()
+    if len(ids)>512 or any(not re.fullmatch(r'[0-9]{1,20}',p) for p in ids):
         raise Unsupported('rule set outside bounded adapter limit')
     if not ids:
         return []
@@ -787,9 +1314,9 @@ def managed_vpn_safety(profile):
     settings=json.loads(raw)
     if not isinstance(settings,dict):
         raise Unsupported('settings shape')
-    selected={k:settings.get(k) for k in ('strictVPN','routeDNS','overrideDefaultRoute','c2sSNATDisabled')}
+    selected={k:settings.get(k,default) for k,default in VPN_SAFETY_DEFAULTS.items()}
     if any(type(v) is not bool for v in selected.values()):
-        raise Unsupported('explicit safety settings required')
+        raise Unsupported('invalid explicit safety setting; only absent fields use reviewed defaults')
     # Include full settings hash in the stale-state fingerprint, never return settings.
     return selected,hashlib.sha256(raw).hexdigest()
 
@@ -836,14 +1363,14 @@ def managed_lifecycle_state(spec):
     if not os.path.isfile('/home/pi/.firewalla/run/'+folder+'/'+profile+suffix):
         raise Unsupported('profile type mismatch')
     cached=run(['redis-cli','--raw','GET','VC:'+profile+':connState']).strip()
-    if cached not in ('true','false'):
-        raise Unsupported('cached lifecycle state missing')
+    if cached not in ('true','false',''):
+        raise Unsupported('cached lifecycle state malformed')
     rows=json.loads(run(['ip','-j','link','show']))
     links=[row for row in rows if row.get('ifname')=='vpn_'+profile]
     if len(links)>1:raise Unsupported('ambiguous interface')
     up=bool(links and 'UP' in links[0].get('flags',[]))
-    connected=cached=='true'
-    if connected!=up or (not connected and links):
+    connected=(cached=='true') if cached else None
+    if (connected is True and not up) or (connected is not True and links):
         raise Unsupported('transitional or conflicting lifecycle observations')
     unit=None
     if spec['vpn_type']=='openvpn':
@@ -853,9 +1380,15 @@ def managed_lifecycle_state(spec):
             raise Unsupported('OpenVPN unit must be disabled and match observed connection state')
     data={'connected':connected,'settings_hash':settings_hash,'safety':safety,'unit':unit}
     return {'fingerprint':hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
-            'configuration_fingerprint':settings_hash,'present':spec['desired']=='connect' and connected,'field':{'observed_connected':connected,'administrative_intent':'unknown'},
+            'configuration_fingerprint':settings_hash,'present':spec['desired']=='connect' and connected is True,'field':{'observed_connected':connected,'administrative_intent':'unknown'},
             'rollback':'not_supported; inverse requires a separately approved preview',
-            'scope':'profile-wide; all routed devices may be affected'}
+            'scope':'profile-wide; all routed devices may be affected; native start may restart the unit and stop disables it; no persistent system VPN policy is changed'}
+
+
+def require_action_deadline(args):
+    expiry=args.get('expires_at')
+    if type(expiry) is not int or not time.time()<expiry<=time.time()+600:
+        raise ValueError('Missing or expired bounded action deadline')
 
 
 def managed_lifecycle(args):
@@ -866,6 +1399,7 @@ def managed_lifecycle(args):
     if args.get('expected')!=state['fingerprint'] or state['present']:
         return {'outcome':'stale','changed':False}
     try:
+        require_action_deadline(args)
         management_request('cmd','startVpnClient' if spec['desired']=='connect' else 'stopVpnClient','0.0.0.0',
                            {'type':spec['vpn_type'],'profileId':spec['profile']},lifecycle=True)
         after=managed_lifecycle_state(spec)
@@ -883,7 +1417,12 @@ def managed_write(args):
     mode=args['mode']
     if mode not in ('preview','apply','rollback'):
         raise ValueError('managed mode')
-    management_guard(args.get('revision'))
+    if mode!='preview':require_action_deadline(args)
+    management_guard(args.get('revision'), spec['kind'], spec.get('feature'))
+    if spec['kind']=='managed_forward_batch':
+        return managed_forward_batch(args)
+    if spec['kind']=='managed_forward':
+        return managed_forward(args)
     if spec['kind']=='managed_lifecycle':
         return managed_lifecycle(args)
     if spec['kind']=='managed_scoped':
@@ -899,6 +1438,10 @@ def managed_write(args):
     if spec['kind']!='managed_scoped' and run(['redis-cli','--raw','EXISTS','host:mac:'+spec['device']]).strip()!='1':
         raise Unsupported('device missing')
     context=args.get('context')
+    if spec['kind']=='managed_vpn' and context is not None:
+        if (not isinstance(context,dict) or set(context)!={'before'} or
+                context['before']!={'state':True,'profileId':spec['expected_profile']}):
+            raise ValueError('VPN rollback context must restore the approved expected profile only')
     state=managed_state(spec,context)
     if mode=='preview':
         if spec['kind']=='managed_vpn' and not context and state['field']['profileId']!=spec['expected_profile']:
@@ -908,6 +1451,7 @@ def managed_write(args):
         return {'outcome':'stale','changed':False}
     # All failures once a mutation is sent remain uncertain; never automatic retry.
     try:
+        require_action_deadline(args)
         if spec['kind']=='managed_rule':
             if mode=='apply':
                 if state['present']:
@@ -957,7 +1501,172 @@ def managed_write(args):
         return {'outcome':'uncertain','context':context,'reason':'Management request or selected verification failed; a new rule may remain disabled. Inspect before any new attempt.'}
 
 
+# Selected fields only: never HGETALL/init/getAttributes for these reads.
+MEMBERSHIP_LUA = r"""
+local bytes=0
+local function field(k,f,max)
+ if redis.call('HSTRLEN',k,f)>max then error('field limit') end
+ local v=redis.call('HGET',k,f)
+ if v then bytes=bytes+#v; if bytes>90000 then error('byte limit') end end
+ return v
+end
+local tags={}
+for _,spec in ipairs({{'user','userTag:uid:'},{'group','tag:uid:'},{'device','deviceTag:uid:'},{'ssid','ssidTag:uid:'}}) do
+ local key='tag:'..spec[1]..':active'
+ if redis.call('SCARD',key)>256 then error('tag limit') end
+ for _,id in ipairs(redis.call('SMEMBERS',key)) do
+  if not string.match(id,'^%d+$') or #id>20 then error('tag schema') end
+  local row={type=spec[1],uid=id,name=field(spec[2]..id,'name',256)}
+  for _,f in ipairs({'userTags','tags','deviceTags','ssidTags'}) do row[f]=field('policy:tag:'..id,f,4096) end
+  table.insert(tags,row)
+  if #tags>256 then error('tag limit') end
+ end
+end
+local cursor='0';local hosts={};local seen={};local complete=false
+for i=1,1024 do
+ local page=redis.call('SCAN',cursor,'MATCH','host:mac:*','COUNT',256);cursor=page[1]
+ for _,key in ipairs(page[2]) do
+  if not seen[key] then
+   seen[key]=true
+   if #hosts>=1024 then error('host limit') end
+   local mac=string.sub(key,10)
+   local row={mac=mac,name=field(key,'name',256),bname=field(key,'bname',256)}
+   for _,f in ipairs({'userTags','tags','deviceTags','ssidTags'}) do row[f]=field('policy:mac:'..mac,f,4096) end
+   table.insert(hosts,row)
+  end
+ end
+ if cursor=='0' then complete=true;break end
+end
+return cjson.encode({tags=tags,hosts=hosts,complete=complete})
+"""
+
+def membership_snapshot():
+    result=json.loads(run(['redis-cli','--raw','EVAL',MEMBERSHIP_LUA,'0']))
+    # Redis cjson encodes empty Lua arrays as {}.
+    for key in ('tags','hosts'):
+        if result.get(key)=={}: result[key]=[]
+    return result
+
+
+def safe_profile_file(path, cap=262144):
+    """Local-only bounded read, no following symlinks, never returned verbatim."""
+    import stat
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        st=os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size>cap:
+            raise Unsupported('profile file bounds')
+        data=os.read(fd,cap+1)
+        if len(data)>cap: raise Unsupported('profile file bounds')
+        return data.decode('utf-8')
+    finally: os.close(fd)
+
+
+def endpoint_host(value):
+    if not isinstance(value,str) or not 1<=len(value)<=253 or '%' in value:
+        raise ValueError('endpoint host')
+    try: return str(ipaddress.ip_address(value))
+    except ValueError:
+        if not re.fullmatch(r'(?=.{1,253}\Z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?',value):
+            raise ValueError('endpoint host') from None
+        return value.lower()
+
+
+def openvpn_endpoints(content):
+    # Never interpret script directives, inline keys, includes, or external paths.
+    import shlex
+    remotes=[]; proto=None; default_port=None; block=None; complex_blocks=False
+    for line in content.splitlines():
+        line=line.strip()
+        if line.startswith('<'):
+            if line=='<connection>': complex_blocks=True
+            if line.startswith('</'): block=None
+            else: block=line
+            continue
+        if block or not line or line.startswith(('#',';')): continue
+        if line.split(None,1)[0] not in ('remote','proto','port','rport'): continue
+        parts=shlex.split(line,comments=True)
+        if parts[0]=='proto' and len(parts)==2: proto=parts[1]
+        elif parts[0] in ('port','rport') and len(parts)==2: default_port=port(int(parts[1]))
+        elif parts[0]=='remote' and 2<=len(parts)<=4:
+            remotes.append(parts[1:])
+            if len(remotes)>32: raise Unsupported('remote limit')
+        else: raise Unsupported('endpoint directive schema')
+    out=[]
+    for row in remotes:
+        protocol=row[2] if len(row)>2 else proto
+        transport='udp' if protocol in ('udp','udp4','udp6') else 'tcp' if protocol in ('tcp','tcp-client','tcp4-client','tcp6-client') else None
+        out.append({'hostname_or_ip':endpoint_host(row[0]),'port':port(int(row[1])) if len(row)>1 else default_port,
+                    'transport':transport,'active':None})
+    return {'configured_endpoints':out,'endpoints_complete':not complex_blocks,
+            'note':'Configured remotes, not active server or DNS resolvers. Omitted port/protocol remain unknown; connection blocks are not projected.'}
+
+
+def wireguard_endpoints(config):
+    peers=config.get('peers',[])
+    if not isinstance(peers,list) or len(peers)>32: raise Unsupported('peer limit')
+    out=[]
+    for peer in peers:
+        value=peer.get('endpoint')
+        if not value: continue
+        if not isinstance(value,str): raise Unsupported('endpoint schema')
+        if value.startswith('['):
+            host,sep,number=value[1:].partition(']:')
+        else: host,sep,number=value.rpartition(':')
+        if not sep: raise Unsupported('endpoint schema')
+        out.append({'hostname_or_ip':endpoint_host(host),'port':port(int(number)),'transport':'udp','active':None})
+    return {'configured_endpoints':out,'endpoints_complete':True,
+            'note':'Configured peer endpoints only, not current handshake or DNS resolvers.'}
+
+
+def saved_vpn_profiles(base='/home/pi/.firewalla/run'):
+    from pathlib import Path
+    profiles=[]; inventory_complete=True
+    links=network('interfaces'); interfaces={r['ifname']:r for r in links['rows'] if 'ifname' in r}
+    for kind,directory,suffix in [('openvpn','ovpn_profile','.ovpn'),('wireguard','wg_profile','.settings')]:
+        folder=Path(base)/directory
+        if not folder.exists(): continue
+        if folder.is_symlink() or not folder.is_dir(): raise Unsupported('profile directory schema')
+        entries=[]
+        with os.scandir(folder) as scan:
+            for entry in scan:
+                if len(entries)>=1024: raise Unsupported('directory bound')
+                entries.append(entry.name)
+        ids=sorted(name[:-len(suffix)] for name in entries if name.endswith(suffix))
+        if len(profiles)+len(ids)>128: raise Unsupported('profile limit')
+        for identifier in ids:
+            if not re.fullmatch(r'[A-Za-z0-9_]{1,10}',identifier): raise Unsupported('profile ID schema')
+            name=None; metadata='ok'
+            try:
+                settings=json.loads(safe_profile_file(folder/(identifier+'.settings'),32768))
+                name=rule_text(settings.get('displayName') or settings.get('serverBoxName'))
+            except FileNotFoundError: metadata='settings_missing'
+            endpoint_data={'configured_endpoints':[],'endpoints_complete':False}
+            try:
+                if kind=='openvpn': endpoint_data=openvpn_endpoints(safe_profile_file(folder/(identifier+'.ovpn')))
+                else: endpoint_data=wireguard_endpoints(json.loads(safe_profile_file(folder/(identifier+'.json'))))
+            except (ValueError,OSError,Unsupported,TypeError,AttributeError):
+                metadata='endpoint_metadata_unavailable'
+            intf='vpn_'+identifier
+            observed=interfaces.get(intf)
+            raw=run(['redis-cli','--raw','GET','VC:'+identifier+':connState']).strip()
+            cached={'true':True,'false':False,'1':True,'0':False}.get(raw)
+            profiles.append({'profile_id':identifier,'name':name,'vpn_type':kind,'saved':True,
+                'interface':intf if observed else None,'interface_present':True if observed else None if links['truncated'] else False,
+                'interface_operstate':observed.get('operstate') if observed else None,
+                'cached_connected':cached,'administrative_state':'unknown','effective_device_routing':'unknown',
+                'metadata_status':metadata,**endpoint_data})
+    matched={'vpn_'+r['profile_id'] for r in profiles}
+    return {'profiles':profiles,'supported_types':['openvpn','wireguard'],'inventory_complete_for_supported_types':inventory_complete,
+            'interface_inventory_truncated':links['truncated'],
+            'unmatched_interfaces':[n for n in interfaces if re.match(r'^(vpn_|tun|tap|wg)',n) and n not in matched],
+            'note':'Names are configured labels; duplicate/missing names are preserved. Other VPN types are not inventoried. Cached connectivity/interface presence do not prove health, stopped intent, or device routing.'}
+
+
 def dispatch(op, args):
+    if op == "managed_workflow_state": return workflow_state(args)
+    if op == "membership_snapshot": return membership_snapshot()
+    if op == "saved_vpn_profiles": return saved_vpn_profiles()
     if op == "managed_write":
         return managed_write(args)
     if op == "service_features":
@@ -972,6 +1681,8 @@ def dispatch(op, args):
         return device_flow_page(args)
     if op == "write":
         return write_operation(args)
+    if op == "policy_summaries":
+        return rule_page(args)
     if op in ("alarm_summaries", "policy_summaries"):
         limit=args["limit"]
         if type(limit) is not int or not 1<=limit<=10:

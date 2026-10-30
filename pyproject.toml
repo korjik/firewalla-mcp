@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "firewalla-mcp"
 version = "0.1.0"
-description = "Unofficial read-only Firewalla diagnostics over verified SSH"
+description = "Unofficial Firewalla diagnostics and guarded operations over verified SSH"
 requires-python = ">=3.11"
 dependencies = ["mcp>=1.26,<2", "pydantic>=2.11,<3"]
 

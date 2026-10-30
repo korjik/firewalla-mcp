@@ -1,75 +1,77 @@
-# Experimental persistent management adapters
+# Persistent device, app and DNS controls
 
-These are executable adapters, distinct from the temporary Linux tools and the non-executable `stage_*` proposals. They call fixed `cmd policy:create`, `cmd policy:delete`, `cmd policy:enable`, `set policy`, or explicit VPN start/stop requests on `http://127.0.0.1:8834/v1/encipher/simple` **inside the appliance over verified SSH**. No local API port is exposed or forwarded. No HTTP proxy/redirect is followed. No endpoint is enabled or management daemon started. Explicit VPN lifecycle requests can start/stop the selected client; policy enforcement can trigger normal DNS reloads. Requests use existing Firewalla management logic and its asynchronous enforcement/background persistence machinery.
+These typed adapters use existing Firewalla management requests over internal SSH.
+They never enable an API, write raw Redis policy state or install temporary kernel
+rules while claiming app persistence. They are source/contract tested, not deployed
+or live-enforcement tested by this release.
 
-The reviewed contract is official source commit `4b4d9fecbd9fd56613ffba91a7c88b26f1b67396`. The adapter requires that exact installed `/home/pi/firewalla` HEAD and a clean tracked source tree, then sends the harmless `cmd ping` operation to check existing API availability. Other revisions fail closed. This strict experimental guard may reject released appliances; do not change or upgrade a router merely to satisfy it. Add another compatible revision only after source/contract review and tests. A clean checkout and ping do not prove the running process loaded that source; the operator must verify runtime/source alignment before enabling writes. No live compatibility claim is made for Gold Plus or Gold SE management APIs.
+## Reviewed installed contracts
 
-Add to an existing box entry, alongside the existing SSH settings:
+The two revisions and shared tree in [firmware review](vpn-firmware-contract.md)
+now support the following additional kinds through `policy_source_guard`:
 
-```json
-{
-  "management_revision": "4b4d9fecbd9fd56613ffba91a7c88b26f1b67396",
-  "managed_devices": ["02:00:00:00:00:01"],
-  "managed_vpn_profiles": ["vpn-a", "vpn-b"],
-  "managed_scopes": ["tag:123", "network:00000000-0000-0000-0000-000000000001"]
-}
-```
+- `managed_feature`: device Ad Block, Safe Search or Unbound.
+- `managed_scoped`: the same three features for a numeric group or network UUID.
+- `managed_rule`: new device Internet/category/app/IP/domain blocks, recurring
+  category/app blocks and literal-IP DNS-answer rules.
 
-This alone does not enable writes. The top-level `writes_enabled`, protected approval directory and audit file from [writes.md](writes.md) are still required. Each preview binds the exact arguments, device, revision-dependent snapshot, expiry and rollback context to the operator approval digest. HTTP read-only mode excludes all seven managed/lifecycle previews and `apply_change`. Run only one writer process.
+Both appliance copies of Policy.js, PolicyManager2.js, SafeSearchPlugin.js,
+UnboundPlugin.js and AdblockPlugin.js matched by SHA256. Their five digests are
+pinned in `remote.POLICY_SOURCE_HASHES` in addition to the existing eleven-file
+management/VPN contract and exact Git revision/tree guard. Only a validated
+translation dictionary edit is tolerated; relevant code drift fails closed.
+No Firewalla AGPL implementation is copied into this repository; tests are
+independent synthetic contract fixtures.
 
-## Implemented contracts
+Source review verified netbot's device/group/network target dispatch and native
+policy set/create/enable/delete requests; Policy's domain/MAC canonicalization;
+disabled-duplicate handling; native scheduled policy fields; and PolicyManager2's
+DNS `address` action forwarding of resolver, scope, exact-match and IP-only flags.
+The three service plugins explicitly distinguish true, false and null for Host,
+Tag and NetworkProfile. Runtime-source alignment and asynchronous enforcement
+still need operational verification before deployment or a live write.
 
-- **Device features:** Ad Block is a scalar tri-state; Safe Search, Unbound and DoH use `{state: ...}`. True enables, false inherits, null explicitly disables at device scope. Only an existing explicit value with exactly the recognized fields can be changed. Missing/extended schemas fail closed so rollback never invents an absent prior state. Other policy fields are untouched. Inheritance/global precedence is not resolved by this adapter.
-- **New device block rules:** Internet uses `type=mac` and the exact MAC target. Category/app/IP/domain rules use a single-device scope, `action=block`, `direction=outbound`. Apps resolve dynamically to `TLX-fw-<id>` only when the cached catalog declares `features.acl=true`. Video uses `av`. At most 128 active policy IDs are inspected. A fixed, read-only Redis Lua projection returns selected policy fields plus an opaque full-record hash computed within Redis; arbitrary policy fields never leave Redis. Possible duplicate type/target pairs are rejected even when scopes differ. The created numeric ID is retained for approved rollback. No existing rule is edited or broadly deleted.
-- **Existing-profile VPN switch:** Requires an explicit enabled `{state:true, profileId:M}` policy and exactly the expected M. Both M and N must be operator-allowlisted and have unambiguous OpenVPN/WireGuard profile-file existence. Profile configuration files are never opened. Bounded `.settings` files are inspected locally; explicit boolean `strictVPN`, `routeDNS`, `overrideDefaultRoute`, and `c2sSNATDisabled` must match. Full settings hashes participate in stale-state checks, but raw settings do not leave the appliance. Profile settings are never changed. Only `profileId` changes; rollback restores the exact original selected policy. No profile API, credentials or private keys are read.
+DoH and NTP implementations were not included in this review and remain blocked
+on these installed revisions. Their older-revision adapters are not certification
+of current support. RADIUS/global changes and arbitrary existing-rule CRUD are
+unsupported.
 
-Preview makes no mutation. `apply_change` consumes an independently created approval, rechecks state and calls management logic once. Result `persistent_state_verified=true` means selected stored policy/rule readback matches, **not** that firewall/DNS/routing enforcement completed. Results always label enforcement and effective device VPN path unverified. Asynchronous Firewalla events may later fail. Independent traffic/DNS/kill-switch checks are necessary before claiming the requested behavior works.
+## Exact behavior and limits
 
-Rollback needs a new preview and approval and refuses changed snapshots. Kernel and managed operations share the ten-minute plan window. Unknown/timeout outcomes are never retried automatically. A process restart loses plan state. There is no transaction against other Firewalla app/API writers: avoid concurrent changes. In particular, a duplicate rule introduced between snapshot and creation can produce an ambiguous management result; inspect before doing anything further.
+Feature previews require an existing recognized explicit value so rollback can
+restore it exactly. Ad Block is a scalar; Safe Search and Unbound use `{state:...}`.
+Enable=true, inherit=false, explicit disable=null. Removing a local override does
+not bypass an inherited/global rule. Unknown extra policy fields fail closed.
 
-## Exact remaining gaps and evidence needed
+Rules use `action=block`, `direction=outbound`; Internet targets the exact MAC,
+other rules use a single-device scope. Apps resolve dynamically only when the
+catalog declares ACL support. Video category is `av`. DNS answer rules include
+subdomains and only accept canonical unscoped literal IP answers. Schedules use
+typed weekly fields and verified router timezone, not raw cron input.
 
-| Gap | Why it is not enabled | Minimum evidence/design needed |
-|---|---|---|
-| VPN profile import/addition | `saveVpnProfile` validates/saves credential-bearing content, writes settings, runs setup and returns `getAttributes(true)` including configuration; timeout may leave partial files. This project has no approved secret-ingress, upstream logging audit or exact partial-failure recovery contract | Review all supported profile validators and their logs; define mounted one-use secret input without MCP argument/log exposure, file ownership/permissions, duplicate prevention and partial-write recovery; approve a disposable profile test. Merely discarding the response is insufficient |
-| Exact VPN lifecycle rollback / live connectivity | Start/stop is now implemented with bounded long-operation handling, but in-memory reconnect intent and prior sessions cannot be reconstructed; OpenVPN stop also disables its unit | No automatic rollback is offered. Only already-disabled OpenVPN units are supported; inverse changes require a new approval. Independent device/kill-switch tests remain necessary |
-| Global controls, quotas and effective inheritance | Group/network selected controls and scheduled category/app rules are implemented; global false/null semantics, quota behavior and complete inheritance evaluation are not | Global-specific fixtures and effective observations; Users time quotas must not be modeled as device quotas |
-| Existing arbitrary rule edits/deletes | Unknown fields, schedules and identity preservation make exact reconstruction unsafe | Complete supported typed schemas and management update/idempotency/conflict contracts; no raw-policy passthrough |
-| Arbitrary existing DNS CRUD, provider/global configuration and RADIUS | New device DNS overrides and network NTP policy changes are implemented; existing-rule reconstruction, provider defaults and secret-bearing RADIUS enrollment are not | Typed existing-rule update/list contracts, provider-specific defaults and recovery tests; reviewed secret ingress for RADIUS |
-| Persistent routes/port forwards | Broader FireRouter configuration versions and restart effects are not equivalent to kernel state | Configuration transaction/version contract and rollback with service impact accounted for |
+At most 512 policy IDs are inspected, with bounded total Redis data/output.
+Oversized configurations fail closed, not partially. Selected public fields and
+opaque hashes bind the complete observed set; possible duplicate type/target
+pairs are rejected even across scopes. Creation first saves a new disabled rule,
+verifies its ID/fields, then enables it. This prevents upstream duplicate-create
+behavior from reactivating an existing disabled rule under create-new approval.
+Rollback deletes only the verified created ID when its expected state still matches.
 
-## Live validation approval boundary
+Native acknowledgments and stored readback are not proof of packet filtering,
+DNS answers or schedule execution. Normal Firewalla processing may reload DNS and
+schedule background persistence. Concurrent writers are not atomically excluded;
+uncertain outcomes stop without blind retry or cleanup.
 
-No new adapter, profile settings extraction or live management write has run on the appliances. The earlier credential-bearing `vpnProfiles` query was denied and is not used by this implementation.
+## Enablement
 
-Before live VPN validation, request approval for **the exact two owner-selected profile IDs** on one selected appliance: check only their config-file existence (never open configs), read each bounded `.settings` file locally, retain only the four safety booleans and opaque hashes, and read the selected device's `vpnClient` field. Do not retrieve profile API responses, raw settings, provider credentials, keys or other profiles. This is a proposed separate approval scope, not permission already obtained.
+Use [host-confirmed writes](writes.md) with the general catalog and persistent
+ledger/audit. `scripts/managed_ssh_gate.py` is a separately reviewed installation
+template for the supported kinds/features plus VPN/forwarding/capture. It rejects
+DoH/NTP, temporary kernel writes and arbitrary commands. Its helper pins must match
+the exact release; publishing this template does not install or authorize it.
+Existing VPN/capture deployments retain their narrower gates until a separate
+permission/deployment review. Kernel tools need their own explicitly scoped gate.
 
-A later mutation test needs its own explicit approval for one device M-to-N policy change, expected current M, matching safety settings, an independent effective route/DNS/kill-switch test plan, and a separately approved rollback to M. For rules, use one owner-selected disposable device and destination; approve creating that exact block and deleting only its resulting ID. No router changes are necessary for contract/mock tests.
-
-## Primary source contracts
-
-Reviewed, independently implemented (no upstream source copied): [encipher route](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/api/routes/encipher.js), [netbot set/cmd handlers](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/controllers/netbot.js), [Monitorable policy storage/events](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/net2/Monitorable.js), [Policy equality](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/alarm/Policy.js), [VPNClient settings/defaults](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/extension/vpnclient/VPNClient.js), [DNSCrypt scoped tri-state](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/sensor/DNSCryptPlugin.js).
-
-
-## Scheduled rules, scoped services, DNS and VPN lifecycle
-
-`preview_scheduled_block_rule` accepts only structured hour/minute/weekday/duration fields and constructs a five-field cron expression. Weekdays use 0 Sunday through 6 Saturday; duration is 60–79200 seconds to avoid ordinary daily overlap. The owner-supplied timezone must match `sys:config.timezone` (missing means UTC per reviewed source). No timezone changes are made. Execution follows the appliance scheduler's local-time/DST behavior; this is not a UTC interval guarantee. Duplicate rules are conservatively rejected, and editing arbitrary existing schedules remains unsupported.
-
-`preview_scoped_service_control` supports numeric group IDs and canonical network UUIDs through `tag:<id>` and `network:<uuid>` management targets. Exact target strings must appear in `managed_scopes`. Only existing recognized policy values can be changed/restored. NTP is network-only: source `NTPRedirectPlugin.applyMonitorable` rejects other scopes. The adapter requires dynamic `ntp_redirect=1` and cached local NTP status 1, and never enables the feature, starts its daemon or changes system time. Cached health is not a fresh NTP response test.
-
-`preview_dns_override` creates a device-scoped `type=dns, action=address` rule with a literal answer in `resolver`, `ipOnly=true`, and subdomain matching. These DNS address directives affect the domain **and its subdomains**; this adapter does not promise exact-host-only matching. Other query types may receive NODATA rather than upstream forwarding. Normal management enforcement may reload DNS. Rollback deletes the exact new rule ID. Listing/editing arbitrary existing overrides and global wildcard overrides are not exposed.
-
-`preview_vpn_lifecycle` supports existing OpenVPN/WireGuard profiles whose IDs fit the `vpn_` Linux interface name (1–11 characters). It checks selected settings, cached connection state, interface presence/up flags, and OpenVPN unit state. Missing/conflicting/transitional state fails closed. OpenVPN units must have `UnitFileState=disabled`, so stop's built-in disable action does not unexpectedly change enablement. No systemctl mutation is issued by this adapter: it invokes Firewalla's `startVpnClient`/`stopVpnClient` management logic. WireGuard checks JSON profile-file existence without opening its credential-bearing contents.
-
-Lifecycle approval covers the whole profile and all devices routed through it. It is a runtime change, not a boot-persistence promise. An 80-second HTTP request budget accommodates the source's roughly 60-second link-establishment wait; helper/transport budgets are 110/115 seconds. Responses are discarded without reading configuration or statistics. A failed/timed-out call is uncertain and may continue on the appliance; automatic retry is forbidden. Successful results verify only matching cached/interface/service observations and unchanged settings fingerprints, never peer reachability or effective device traffic. There is **no exact lifecycle rollback**: reconnecting cannot recreate the old session/reconnect intent. A compensating start/stop must be independently previewed and approved after inspection.
-
-Additional reviewed primary contracts: [scheduler](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/extension/scheduler/scheduler.js), [DNS address rule enforcement](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/extension/dnsmasq/dnsmasq.js), [NTP network policy](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/sensor/NTPRedirectPlugin.js), [OpenVPN lifecycle](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/extension/vpnclient/OpenVPNClient.js), [WireGuard lifecycle](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/extension/vpnclient/WGVPNClient.js).
-
-
-## Canonical identity and create-new safety
-
-DNS targets are lowercased and IP targets/answers canonicalized before preview digests, duplicate checks and dispatch. Scoped IPv6 literals (`%zone`), whitespace/control characters and configuration metacharacters are rejected. Existing DNS/domain targets are compared case-insensitively; MAC targets are compared in uppercase and equivalent IP representations are normalized. Duplicate detection is deliberately broader than upstream equality: any equivalent type/target conflicts, regardless of scope/action/disabled state.
-
-Upstream `checkAndSave` can reactivate an existing disabled rule when asked to create an enabled duplicate. To prevent this even if a duplicate appears after the snapshot, creation now sends `disabled="1"`. A duplicate then remains untouched. The adapter verifies a newly returned ID was absent from the snapshot, reads its exact disabled rule fields, and only then sends `policy:enable` for that new ID. Approval covers creating and enabling this new rule, never reactivating an old rule. If the multi-step operation fails, a new disabled rule may remain; the uncertain response retains its ID when known. Inspect it rather than retrying automatically. Concurrent external edits remain outside transaction guarantees.
-
-A cached disconnected link is not proof of administrative stop intent: Firewalla can keep `_started=true` and reconnect later. Disconnect previews therefore never return `no_change` solely because the link is down. They require an approved `stopVpnClient` request, then report the management acknowledgment separately from observed link state and still-unverified asynchronous listeners. No credential-bearing status API is used.
+A plan binds exact targets/settings/prior state and expires. The host obtains
+explicit confirmation, then calls MCP apply directly. No external SSH approval
+file is required in host-confirmed mode. See [tool schemas](tool-reference.md).

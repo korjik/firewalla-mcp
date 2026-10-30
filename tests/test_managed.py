@@ -2,6 +2,7 @@
 No production device records or profile contents are used.
 """
 import copy
+import time
 import json
 from unittest.mock import AsyncMock
 from pathlib import Path
@@ -18,7 +19,7 @@ RULE=dict(kind='managed_rule',device=MAC,rule_type='category',target='av')
 @pytest.fixture
 def appliance(monkeypatch):
     state={'feature':{'state':False},'vpn':{'state':True,'profileId':'vpn-a'},'rules':[],'requests':[]}
-    monkeypatch.setattr(remote,'management_guard',lambda revision:None)
+    monkeypatch.setattr(remote,'management_guard',lambda revision,*args:None)
     def run(argv,*a,**k):
         if 'EXISTS' in argv:return '1\n'
         if 'HGET' in argv:return json.dumps(state['vpn'] if argv[-1]=='vpnClient' else state['feature'])
@@ -48,7 +49,7 @@ def preview(spec):
     return remote.managed_write(dict(mode='preview',revision=remote.MANAGEMENT_REVISION,spec=spec))
 
 def apply(spec,state,mode='apply',context=None):
-    return remote.managed_write(dict(mode=mode,revision=remote.MANAGEMENT_REVISION,spec=spec,expected=state['fingerprint'],context=context))
+    return remote.managed_write(dict(mode=mode,revision=remote.MANAGEMENT_REVISION,spec=spec,expected=state['fingerprint'],context=context,expires_at=int(time.time())+600))
 
 @pytest.mark.parametrize('feature',['adblock','safeSearch','unbound','doh'])
 @pytest.mark.parametrize('desired,expected',[('enable',True),('disable',None),('inherit',False)])

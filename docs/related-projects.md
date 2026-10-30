@@ -15,13 +15,15 @@ No code, fixtures or license text from these projects has been copied into the i
 
 | Feature family in related projects | Current local SSH support | Adaptable / unsupported gap |
 | --- | --- | --- |
-| Devices and box health | Paged MAC inventory, known-device details, health/services/network/VLANs | Friendly names, tags and rich app metadata omitted for privacy/schema scope |
-| Rules | Managed type/action/state summaries, kernel counters, opt-in temporary filter append/rollback | Persistent app rule create/pause/resume/delete requires validated management/enforcement path; paired-client/MSP calls cannot be translated to Redis writes |
+| Devices and box health | Paged MAC inventory, known-device details, health/services/network/VLANs | People/name joins implemented locally pending deployment; richer search and visibility semantics remain partial |
+| Rules | Managed type/action/state summaries, kernel counters, opt-in temporary filter append/rollback | Selected persistent create adapters exist in source, disabled in the reader; general pause/resume/delete remain gaps. Paired-client/MSP calls cannot be translated to Redis writes |
 | Port forwarding and routes | Configured mappings, conservative diagnosis, approved temporary DNAT and nonreserved-table routes | Persistent managed config and effective-policy proof unsupported |
 | Alarms | Active-index count and up to 10 type/timestamp summaries | Description/details, archive paging and triage mutation unsupported |
-| Flows and usage | Up to 100 recent system-flow records aggregated on-router into byte/protocol sample totals, plus interface counters | Not historical per-device usage, destination search or billing totals; raw records never leave router |
+| Flows and usage | Up to 100 recent system-flow records aggregated on-router into byte/protocol sample totals, plus interface counters | Bounded per-device selected flow fields are also available; not complete retained history or billing totals |
 | DNS, VPN and connection diagnosis | Resolver state/lookup, interface observations, explicit device VPN policy, scoped conntrack metadata, TCP tests | Effective inherited VPN path and cloud/paired-client control unsupported |
 | Maintenance, target lists, enrichment, scheduled controls | No mutations | Unsupported without individually validated local adapters; no fake success or hidden cloud dependency |
 | Write safety | Off by default, exact box allowlists, preview/digest, operator approval, audit, verification and conditional rollback | Not atomic against external writers; no claim of full app parity |
 
 The new alarm/flow/policy adapters were checked against official [AlarmManager2](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/alarm/AlarmManager2.js), [PolicyManager2](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/alarm/PolicyManager2.js), [FlowTool](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/net2/FlowTool.js) and [BroDetect](https://github.com/firewalla/firewalla/blob/4b4d9fecbd9fd56613ffba91a7c88b26f1b67396/net2/BroDetect.js), then tested using mocked schemas and read-only helper calls on two authorized appliances. Active/archive index ordering is not assumed to be event time. Flow aggregation respects local/source direction when mapping original/responder byte counts to sampled upload/download; sampled records may overlap and are not a complete usage total.
+
+See the [pinned functional parity matrix](ssh-parity-roadmap.md) for current priorities and all eleven reference write actions.

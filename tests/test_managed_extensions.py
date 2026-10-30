@@ -105,7 +105,7 @@ def test_bad_scope_rejected(appliance,spec):
 @pytest.fixture
 def lifecycle(monkeypatch):
     state={'connected':False,'unit_file':'disabled','settings':'a'*64,'calls':[]}
-    monkeypatch.setattr(remote,'management_guard',lambda revision:None)
+    monkeypatch.setattr(remote,'management_guard',lambda revision,*args:None)
     monkeypatch.setattr(remote.os.path,'isfile',lambda p:True)
     monkeypatch.setattr(remote,'managed_vpn_safety',lambda p:({'strictVPN':True},state['settings']))
     def run(argv):

@@ -1,43 +1,36 @@
-# Validation record and safe live procedure
+# Validation and release evidence
 
-## Completed
+## Current reference deployment
 
-- Local Python tests: argument injection and invalid ports, allowlisted targets, strict SSH options, byte caps, subprocess/transport timeout cleanup, unsupported schemas, secret-field projection, independent-vantage regression, MCP catalog and actual stdio initialize/list/call roundtrip.
-- Actual helper executed in memory over an existing trusted SSH connector on two authorized appliances. Health, all network modes, configured forwarding mappings, ipset names, router socket count and NAT counters returned `ok`. Filter counters returned `ok` on one and `unsupported` on the other. No raw outputs were published.
-- No keys generated or installed. No firewall/VPN settings, services, packages, automations or NAS deployment changed.
+`capture-v1` was built and deployed on an amd64 NAS. It exposes47 tools:36 read/inspection, seven VPN methods and four capture methods. Gold Plus/x86_64 and Gold SE/aarch64 both passed actual MCP/internal OpenSSH health reads. Strict known-host checks remain enabled.
 
-## Not established
+Verified: authenticated Streamable HTTP initialize/list/call; matching ContextForge tool schemas/associations; unchanged existing gateway/OAuth identity; rejected missing/bad bearer and invalid Origin; rejected unknown apply/capture plans and capture limits. Actual-image network-none fake-capture timeout/cancellation checks verified child cleanup. No real capture, probe or VPN/network mutation was used for deployment acceptance.
 
-The cloud workspace has no authorized direct LAN TCP route or dedicated mounted router key. Therefore the new server's own OpenSSH transport has not authenticated to a real appliance end to end. The existing connector supplied the live helper channel. DNS/TCP target probes, a known-MAC device lookup, a selected VPN interface, full live diagnosis, UDP, packet capture, ARM container execution and persistent access are not live-validated. No application/provider assignment or effective kernel mapping is claimed verified.
+The last deployed capture release had629 passing local tests. Subsequent local PR preparation is a separate candidate and must report its final count/build checks in PR evidence, not imply deployment. ARM container execution remains untested.
 
-## Owner-run end-to-end checks
+## Write evidence
 
-On the intended trusted LAN host, configure a dedicated key and verified host fingerprints per `ssh-setup.md`; no need to change the router firewall or restart anything. Start the server or container from an MCP client. Call `list_boxes`, then `capabilities`, `system_health` and `network_state` for each configured label. Compare the values privately with local administrative observations. Only query a known device MAC or VPN interface you have selected. To exercise TCP diagnosis, explicitly allow the chosen target IPs in each box's `probe_networks` and choose an independently routed box. Do not perform general scans.
+- Temporary kernel route/filter/DNAT: mocked and isolated disposable-container tests, including /32/default/named-table state normalization and stale rollback.
+- Persistent rules/device/app/DNS: realistic normalization, duplicate reactivation, tri-state and malformed-input contracts; five additional installed dependencies matched on both routers. Ad Block/Safe Search/Unbound and rule/DNS guards now include those pins. DoH/NTP remain blocked; no live mutation/enforcement validation.
+- VPN lifecycle/switch: installed relevant source contracts and read-only guard checks, mocks for stop intent, state drift and replay; no real mutation during deployment validation.
+- Inactive import: synthetic transaction/recovery tests and a separately authorized one-off three-profile operation. This does not establish all reusable MCP import cases or administrative stop intent.
+- Persistent VPN forwarding/mixed plans: source-pinned native contract, mock asynchronous/partial/state-transition tests; not deployed, no live NAT enforcement or restart/reboot proof.
 
-For helper-only read-only validation through an existing SSH connector, `python scripts/live_probe.py` emits a shell-quoted command that sends the exact helper in memory and prints statuses only. Review the command, then execute it with a 55-second connector timeout. It does not need a new key, installation or writable remote directory. This checks helper operations only, not MCP/OpenSSH transport.
+## Explicit gaps
 
-Additional helper checks passed on both appliances: fixed service states, VPN interface candidates, interface traffic counters, active alarm count, system resolver configuration and a source-scoped loopback conntrack query (empty result, not populated production-flow validation). The Docker image built successfully and the MCP protocol smoke test passed; the final expanded catalog of 21 tools passed the container MCP initialize/list/call smoke test. All 45 local tests passed. Device inventory first-page reads also passed on both appliances after adding support for empty nonterminal SCAN pages.
+No full app parity, real capture acceptance, general live-write enforcement, automatic compound rollback, global effective-policy evaluator, arbitrary permanent route manager or comprehensive long-term traffic history. A stored policy, cached link state or successful API acknowledgment does not prove device traffic behavior. Do not run live tests without exact scope authorization.
 
-Write extension: 71 automated tests passed including host-side approvals and state checks. No write operation has run on any appliance. The previous live helper evidence remains read-only. The catalog has expanded to 27 tools; final Docker/CI checks are performed on the write-extension commit.
+## Reproduce locally
 
-Final write-extension local verification: 27-tool Docker MCP smoke passed; a disposable network-none container successfully added and removed a blackhole route, filter rule and DNAT rule, and rejected stale rollbacks. No router credentials or LAN access were supplied to that sandbox.
+Run pytest, generated catalog freshness, compileall, Docker build, stdio/HTTP smoke and isolated kernel checks listed in CI. Container smoke uses empty boxes and does not authenticate to appliances. Keep credentials out of tests and CI. Production read checks should return only bounded selected fields, never raw VPN/config/Redis dumps.
 
-Reference-informed read extension: 78 local tests pass. Alarm summaries, managed-rule summaries and aggregate flow samples returned `ok` on both appliances using the actual selected read functions through the existing SSH connector. Only status summaries were retained. The full command was rejected by the connector as invalid before execution; a shorter read-only harness containing just those same functions succeeded. No write was attempted. Final catalog: 30 tools.
+## Publication candidate checks
 
-Device-control/flow extension: dynamic app catalogs, explicit/global feature-state projection and bounded control-rule pages returned `ok` on both appliances. One-row device-flow pages returned `ok` with one projected record on each appliance; probes printed only status/count, never identities or flow content. Populated blocked-record formats, category attribution completeness, group inheritance, all pagination/retention cases and pattern behavior are not comprehensively live-certified. Unit tests cover tri-state, Video→av, direction, category filtering, equal timestamps and descriptive pattern logic.
-
-A live loopback VPN-profile query was rejected by automatic approval review because the response may include configuration/credentials. It did not execute and was not retried. Source review confirmed `VPNClient.getAttributes` includes config/settings. The code does not use that endpoint, fetch a full init response, or expose raw VPN configuration. Profile import, connect/disconnect and executable device/group VPN switching remain unsupported pending safe management and secret-scoped verification.
-
-Final consolidated local suite: 100 tests pass, including service-field redaction and RADIUS flag-only reads. Current catalog: 39 tools (only apply_change mutates; three stage tools are explicitly non-executable). The Services adapter is source/mocked only. The public draft will retain a clear list of unsupported persistent controls/VPN/services rather than claiming feature parity.
-
-HTTP extension: 113 tests pass, including real ASGI Streamable HTTP initialize/list/call and auth/Host/Origin/query-token rejection. Full catalog remains 39; HTTP read-only catalog contains 34. Live ContextForge/Okta registration, production TLS/network policy and end-to-end real-router transport are still not verified.
-
-Final container verification: stdio initialize/list/call passed with 39 tools; authenticated Streamable HTTP initialize/list/call and health passed with 34 read-only tools, and unauthenticated requests were rejected. The isolated network-none kernel route/filter/DNAT apply/stale-check/rollback test passed again. No actual gateway registration, Okta configuration, router credential provisioning or live appliance mutation occurred.
-
-Persistent-management extension: **161 tests pass**. Three new executable previews bring the full catalog to **42**, while the HTTP read-only catalog remains **34**. Contract fixtures test device tri-state set/restore, dynamic app/category/Internet/IP/domain block creation and exact-ID rollback, existing-profile device VPN switch/restore, safety-setting mismatch/staleness, revision/dirty-tree rejection, approval binding, uncertain outcomes, and suppression of full policy/error bodies. The production Docker image rebuilt successfully; stdio 42-tool and HTTP 34-tool protocol smoke tests passed. These management adapters have **not** been executed on live appliances. No profile settings have been read live under this extension, and no denied API probe was retried. See managed-writes.md for exact limitations and the separate proposed live approval scope.
-
-Scheduled/scoped-service/lifecycle extension: **196 tests pass**; full catalog **46**, read-only HTTP **34**. New contracts cover structured weekly schedules and timezone mismatch/staleness, IPv4/IPv6 DNS answer rules and exact-ID removal, group/network policy restore, network-only NTP guards, existing-profile start/stop with stale/ambiguous state and timeout handling, OpenVPN enablement rejection and lifecycle settings drift. No live requests or mutations were made for these adapters. VPN lifecycle deliberately has no exact rollback; inverse operations require new approval. See requested-coverage.md for the consolidated requested-versus-implemented checklist.
-
-Final extension container checks passed: production image build, stdio 46-tool initialization/list/call, authenticated HTTP 34-tool initialization/list/call and rejection checks, and isolated kernel route/filter/DNAT apply/stale-check/rollback. No live management API validation is implied.
-
-Independent-review fixes: **244 tests pass**. Regression contracts model upstream DNS lowercasing, disabled-duplicate reactivation, fresh mixed-case creation with approved rollback, equivalent IP/MAC identities, scoped/control-character IPv6 rejection, and down-but-reconnecting VPN stop intent. Rule creation now creates disabled, verifies the new ID and fields, then enables only that new rule. Docker stdio/HTTP checks pass. The expanded network-none kernel smoke passed real `/24`, `/32`, default-route and custom named-table create/conflict/verification/rollback checks. No live appliance calls or payload tests were performed.
+The policy/control compatibility candidate passed 656 tests, generated-catalog
+freshness, compileall and diff checks. Its Docker image passed stdio, authenticated
+HTTP and curl protocol checks with 36 default read-only tools and rejected
+unauthenticated requests. Isolated kernel /24, /32, default and named-table
+conflict/apply/rollback checks passed. A targeted scan found no known private
+network identifiers or credential patterns; source fixtures remain synthetic.
+This candidate has not been deployed. Real capture and new managed-policy/network
+write enforcement remain untested on appliances.

@@ -34,10 +34,10 @@ with tempfile.TemporaryDirectory() as directory:
             headers['MCP-Protocol-Version']=r.json()['result']['protocolVersion']
             r=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}})
             names={t['name'] for t in r.json()['result']['tools']}
-            assert len(names)==34 and 'apply_change' not in names
+            assert len(names)==36 and not {'apply_change','apply_vpn_change','apply_vpn_import','start_capture','apply_network_plan'} & names
             r=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'list_boxes','arguments':{}}})
             assert not r.json()['result'].get('isError',False)
             assert client.get('/healthz',headers=headers).json()['status']=='ok'
-        print('Docker authenticated Streamable HTTP: initialize, 34 read-only tools, call, health, unauthenticated rejection: PASS')
+        print('Docker authenticated Streamable HTTP: initialize, 36 read-only tools, call, health, unauthenticated rejection: PASS')
     finally:
         subprocess.run(DOCKER+['rm','-f',container],check=True,stdout=subprocess.DEVNULL)

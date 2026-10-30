@@ -1,0 +1,22 @@
+# Build first: DOCKER_BUILDKIT=0 docker build -f Dockerfile.legacy -t firewalla-mcp:local .
+# Copy to a reviewed runtime directory. Provision the dedicated token separately.
+services:
+  firewalla-read:
+    image: firewalla-mcp:local
+    command: ["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    # No cpus quota: some NAS kernels lack CPU CFS. Do not change host cgroups.
+    restart: unless-stopped
+    environment:
+      FIREWALLA_MCP_CONFIG: /config/config.json
+      FIREWALLA_MCP_HTTP_TOKEN_FILE: /secrets/http-read-token
+      FIREWALLA_MCP_HTTP_ALLOWED_HOSTS: 127.0.0.1:8771,localhost:8771
+    volumes:
+      - ./config-read.json:/config/config.json:ro
+      - ./secrets:/secrets:ro
+    # Verify availability. Intended for a gateway using the host network.
+    ports: ["127.0.0.1:8771:8000"]
