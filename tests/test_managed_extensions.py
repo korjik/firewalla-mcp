@@ -170,8 +170,8 @@ def test_only_lifecycle_has_extended_deadline():
 
 async def test_scope_and_lifecycle_allowlists(tmp_path):
     site=Site(host='192.0.2.1',identity_file='/key',known_hosts_file='/known',vantage_group='a',management_revision=remote.MANAGEMENT_REVISION)
-    manager=WriteManager(Config(sites={'router-a':site},writes_enabled=True,approval_directory=str(tmp_path),audit_file=str(tmp_path/'audit')),AsyncMock())
-    with pytest.raises(ValueError,match='allowlist'):manager.validate('router-a',SCOPED)
-    with pytest.raises(ValueError,match='allowlist'):manager.validate('router-a',LIFE)
+    manager=WriteManager(Config(sites={'router-a':site},writes_enabled=True,approval_consumed_directory=str(tmp_path),write_confirmation_mode="host_confirmed",vpn_confirmation_mode="host_confirmed",vpn_target_policy="approval_bound",audit_file=str(tmp_path/'audit')),AsyncMock())
+    assert manager.validate('router-a',SCOPED)==site
+    assert manager.validate('router-a',LIFE)==site
     site.managed_scopes=['network:'+SCOPED['target']];site.managed_vpn_profiles=['vpn-a']
     assert manager.validate('router-a',SCOPED)==site and manager.validate('router-a',LIFE)==site

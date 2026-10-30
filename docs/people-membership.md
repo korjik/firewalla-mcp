@@ -1,6 +1,6 @@
 # People and device membership
 
-`people_and_devices` is deployed in inventory-v1 with the reviewed helper trust gate. It does not infer membership from a device name.
+`people_and_devices` returns explicit membership relationships. It does not infer membership from a device name.
 Public source reviewed at revision `173ac36dccb5239a5195a5b4e64d20cb1b618a91`
 and installed source on both tested platforms establish:
 
@@ -28,8 +28,7 @@ The server caps a returned directory at 120 KB and recommends selecting a person
 when larger. Names are untrusted display metadata.
 
 Counts refer to distinct stored MAC records, including retained offline records;
-app display counts may use a different grouping or retention view. No screenshot
-count is hardcoded or treated as current truth. A complete empty Person has zero
+app display counts may use a different grouping or retention view. A complete empty Person has zero
 explicit assignments; a similarly named unassigned device is listed separately
 as a name match, never as ownership. The collector was read-tested on both
 platforms, and the new tool passed backend MCP and MCP gateway invocation tests.

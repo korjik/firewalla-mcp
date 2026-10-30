@@ -31,7 +31,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         writes = VPNWriteManager(config, transport)
         imports = ImportManager(config, import_transport)
         if config.vpn_target_policy == "approval_bound":
-            writes.enabled()  # Verify the separate operator trust boundary before advertising writes.
+            writes.enabled()  # Verify explicit host trust and durable ledger before advertising writes.
 
     if not vpn_write_catalog and config.writes_enabled and config.vpn_writes_enabled:
         from .vpn_import_mcp import ImportManager
@@ -450,7 +450,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
                 "live_writes_available":None,"deployment_validation":"Configured VPN-only mode; live availability requires a successful firmware/scope/SSH/state preview and exact approval. No live mutation validation claimed",
                 "capabilities":["profile import preview/apply/verify", "existing profile start/stop", "device VPN switch with expected source"],
                 "target_policy":config.vpn_target_policy,
-                "confirmation_channel":"Authenticated MCP host enforces exact user confirmation; server executes internal SSH" if writes.host_confirmed() else "Exact user confirmation followed by authorized external SSH issuer invocation",
+                "confirmation_channel":"Authenticated MCP host enforces exact user confirmation; server executes internal SSH",
                 "confirmation_mode":config.vpn_confirmation_mode,
                 "approval_workflow":writes.approval_next_step(),
                 "approval":"Single-use exact plan; confirmation enforcement follows confirmation_mode. Import also requires an explicit maintenance window",
@@ -502,7 +502,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
     async def preview_vpn_lifecycle(box_name: BoxName,profile: Name,vpn_type: Literal["openvpn","wireguard"],
             desired: Literal["connect","disconnect"]) -> dict[str, Any]:
         """Preview profile-wide management start/stop for one existing VPN in the configured box.
-        Target allowlists apply in legacy mode; approval-bound mode requires exact operator confirmation.
+        Approval-bound targets require exact confirmation by the authenticated host.
         Requires consistent cached/interface state; an absent cache with no interface is unknown,
         not already stopped. OpenVPN unit must already be disabled.
         May affect every device using profile; native start may restart its unit and stop disables it.
@@ -534,7 +534,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
     async def preview_managed_vpn_switch(box_name: BoxName, device: Mac,
             expected_profile: Name,destination_profile: Name) -> dict[str, Any]:
         """Preview persistent device VPN policy switch between existing profiles in the configured box.
-        Exact device/profile IDs and current source are bound to operator approval; no name inference.
+        Exact device/profile IDs and current source are bound to exact host confirmation; no name inference.
         Requires explicit enabled source policy, matching selected safety/DNS settings, existing
         OpenVPN/WireGuard profiles. No profile credentials read/imported or settings changed.
         Selected settings are inspected locally; live validation requires separate approval.
@@ -648,7 +648,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
     @mcp.tool(annotations=READ)
     async def preview_rollback(plan_id: str) -> dict[str, Any]:
         """Preview removal of a verified addition while its complete snapshot is unchanged.
-        Requires a new operator approval and apply_change call. Not a generic undo tool.
+        Requires fresh host confirmation and an apply_change call. Not a generic undo tool.
         """
         return await writes.rollback_preview(plan_id)
 
@@ -671,7 +671,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             """Apply an exact import preview after single-use host approval. Never starts/assigns a VPN.
             Follow preview.next_step. In host_confirmed mode obtain exact user
             confirmation in the MCP host, then call this tool directly; SSH stays
-            internal. Legacy operator mode requires its configured issuer. Stop on
+            internal. Stop on
             host denial; never manufacture consent or approval files.
             Uncertain outcomes require inspection; never retry automatically. Credentials remain router-local.
             """
@@ -690,7 +690,6 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             In host_confirmed mode the authenticated MCP host must obtain explicit
             user confirmation, then call this tool directly. SSH is internal; no
             external SSH or file issuance is needed. The server does not attest consent.
-            Legacy operator mode uses authorized SSH issuance described in next_step.
             Never bypass host denial or treat model-generated consent as confirmation.
             """
             if plan_id in writes.plans and writes.plans[plan_id]["spec"]["kind"] not in ("managed_vpn","managed_lifecycle"):

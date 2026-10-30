@@ -25,7 +25,7 @@ General writes additionally require `--allow-write-catalog`, `writes_enabled=tru
 
 Temporary kernel routes/filter/DNAT are explicitly nonpersistent. Managed VPN forwarding uses native Firewalla management and source-reviewed startup restoration, but live persistence/enforcement has not been tested. No adapter enables a development endpoint or changes raw policy Redis data.
 
-Legacy `operator` mode is retained for existing operators who intentionally choose separately issued approval files. It is not required by the host-confirmed installation; see [mode distinctions](approvals.md#configuration-and-trust).
+File-based approval is no longer supported. Existing configurations require explicit [migration](approvals.md#migrating-from-file-based-approval); there is no automatic trust-model switch.
 
 ## Restricted router key
 

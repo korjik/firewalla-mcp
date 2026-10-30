@@ -1,6 +1,6 @@
 """Authenticated private Streamable HTTP boundary for a trusted gateway upstream.
 
-This is a static upstream credential, NOT an Okta/OAuth authorization server.
+This is a static upstream credential, NOT an OAuth/OIDC authorization server.
 """
 import json
 import re

@@ -1,6 +1,6 @@
 # Install, upgrade and roll back
 
-This guide uses generic paths and addresses. Review the [support matrix](features.md) first. The default is read-only; the reference47-tool deployment opts into VPN and capture. No installer automatically grants router privileges, creates OAuth objects or changes policies.
+This guide uses generic paths and addresses. Review the [support matrix](features.md) first. The default is read-only; optional capabilities require deliberate enablement. No installer automatically grants router privileges, creates OAuth objects or changes policies.
 
 ## 1. Persistent runtime and SSH
 
@@ -53,7 +53,7 @@ For host-confirmed writes or capture, retain the `sites` object and configure pe
 
 These fields are additions to your config, not a complete config file. Mount the ledger and audit directories read-write; they must be private, non-symlink directories owned by container UID10001, mode0700. Keep config, keys, known_hosts and bearer read-only. Never clear the ledger to retry a change. No external approval inbox or issuer mount is needed in host-confirmed mode.
 
-For managed writes, set each site's `management_revision` only to its actually reviewed [firmware contract](vpn-firmware-contract.md). Install reviewed restricted SSH helpers for the selected operations before enabling access; see [router command restrictions](writes.md#restricted-router-key). Do not spoof a revision, broaden sudo or reuse a VPN-only gate for general writes. Registered VPN import inputs need their own protected setup.
+For managed writes, set each site's `management_revision` only to its actually reviewed [firmware contract](firmware-compatibility.md). Install reviewed restricted SSH helpers for the selected operations before enabling access; see [router command restrictions](writes.md#restricted-router-key). Do not spoof a revision, broaden sudo or reuse a VPN-only gate for general writes. Registered VPN import inputs need their own protected setup.
 
 The host must enforce human confirmation; the server cannot attest the reply. Review the [common approval workflow and per-tool exceptions](approvals.md) before enabling mutations. Detailed operation examples belong in [examples](examples.md), [VPN operations](vpn-mcp-writes.md), [managed writes](managed-writes.md), [forwarding/plans](persistent-forwarding.md) and [capture](traffic-capture.md).
 

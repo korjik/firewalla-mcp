@@ -1459,6 +1459,7 @@ def managed_write(args):
                 value=managed_rule_value(spec)
                 # Upstream create can reactivate a duplicate disabled rule. Creating disabled
                 # first prevents that behavior even if a duplicate races the snapshot.
+                require_action_deadline(args)
                 pid=management_request('cmd','policy:create','0.0.0.0',{**value,'disabled':'1'},True)
                 context={'pid':pid,'before':None}
                 if pid in state['known_policy_ids']:
@@ -1466,10 +1467,17 @@ def managed_write(args):
                 created=managed_state(spec,context)
                 if not managed_rule_matches(created['field'],value,spec,True):
                     raise Unsupported('new disabled rule did not match approved specification')
+                try:
+                    require_action_deadline(args)
+                except ValueError:
+                    return {'outcome':'partial_expired','changed':True,'context':context,
+                            'state':created,'disabled_rule_verified':True,
+                            'reason':'Deadline expired after verified disabled creation; no enable or cleanup dispatched. Inspect before a new plan.'}
                 management_request('cmd','policy:enable','0.0.0.0',{'policyID':pid})
             else:
                 if not context or not state['present']:
                     return {'outcome':'stale','changed':False}
+                require_action_deadline(args)
                 management_request('cmd','policy:delete','0.0.0.0',{'policyID':context['pid']})
         else:
             if mode=='apply':
@@ -1485,6 +1493,7 @@ def managed_write(args):
                 if not context or 'before' not in context:
                     raise Unsupported('rollback context')
                 value=context['before']
+            require_action_deadline(args)
             management_request('set','policy',managed_target(spec),{managed_field(spec):value})
         after=managed_state(spec,context)
         if spec['kind']=='managed_rule':

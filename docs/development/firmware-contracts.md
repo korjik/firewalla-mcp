@@ -1,19 +1,6 @@
-# Installed VPN contract review
+# Firmware contract design for contributors
 
-Read-only review completed 2026-10-30. No VPN start/stop, device policy mutation,
-credential-bearing API or deployment was performed during this review.
-
-| Observed platform | Installed commit | Working-tree evidence |
-| --- | --- | --- |
-| Gold Plus / x86_64 | `173ac36dccb5239a5195a5b4e64d20cb1b618a91` | Only `locales/en.json` modified; valid string dictionary |
-| Gold SE / aarch64 | `a92caef41689e5d4c929207c003b1a667f39ece2` | No tracked modifications |
-
-The commits have identical Git tree
-`85d99a2bc15d97cc4523d00d4a2f67263a0b22a1`. `git diff --stat` between them is
-empty. All 11 independently read working-file SHA256 values match across the two
-appliances. `vpn_source_guard` passed on both. The existing loopback command
-`ping` returned HTTP200 on both; response bodies were not read. This establishes
-source/endpoint compatibility, not successful mutation or effective enforcement.
+For supported revisions and operator behavior, see [firmware compatibility](../firmware-compatibility.md). This source comparison is evidence for specific adapters, not live enforcement certification.
 
 ## Reviewed paths and differences
 
@@ -53,16 +40,16 @@ The source-file digest manifest is in `remote.py:VPN_SOURCE_HASHES`.
   unapproved change from enabled to disabled startup configuration.
 - `WGVPNClient.js`: equivalent interface/config/handshake flow, but the installed
   implementation uses shell execution where the newer source uses argument arrays.
-  Adapter inputs remain strict identifiers and existing operator-allowlisted
+  Adapter inputs remain strict identifiers and existing strictly validated
   profiles. The adapter does not import or return WireGuard configuration.
 - `util/i18n.js`: localization loads translation data for notifications. No VPN
   request dispatch, policy value, profile ID, command or path is derived from
   `locales/en.json` in these contracts. That file is checked as a bounded regular
-  JSON string dictionary; the owner's edit is neither reverted nor rewritten.
+  JSON string dictionary; permitted localization edits are neither reverted nor rewritten.
 
 ## Guard and adapter changes
 
-Only `managed_lifecycle` and `managed_vpn` can use the two newly reviewed commits.
+The current revisions support the reviewed VPN operations and separately guarded forwarding/policy adapters.
 The guard checks exact commit, tree, tracked modifications and the 11 working-file
 digests on every call. Any other tracked edit, deletion/rename, digest mismatch,
 source symlink, malformed locale or unknown revision fails closed. The original
@@ -95,11 +82,6 @@ file descriptor, preventing pathname replacement between verification and exec.
 VPN rollback context must restore exactly the preview's expected enabled profile;
 arbitrary policy fields cannot be smuggled through the rollback context.
 
-## Subsequent policy/control review
+## Policy/control dependency manifest
 
-The approved five-file read completed on both appliances with identical hashes.
-`POLICY_SOURCE_HASHES` pins Policy.js, PolicyManager2.js and the SafeSearch,
-Unbound and Adblock plugins. The shared eleven-file guard still applies. This
-extends only the reviewed device/group/network features and rule/DNS contracts;
-DoH/NTP remain blocked on these revisions. See [managed writes](managed-writes.md).
-No live policy mutation or deployment was used for this review.
+`POLICY_SOURCE_HASHES` additionally pins Policy.js, PolicyManager2.js and the SafeSearch, Unbound and Adblock plugins. The shared eleven-file guard also applies. This covers reviewed device/group/network features and new rule/DNS contracts; DoH/NTP remain blocked on these revisions. See [managed writes](../managed-writes.md). Keep synthetic contract fixtures independent of vendor implementation code and verify each newly supported operation separately.

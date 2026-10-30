@@ -10,7 +10,7 @@ The preview → explicit confirmation → apply workflow covers supported genera
 4. Invoke the corresponding apply/start tool with its plan ID. The server performs SSH internally; the assistant does not need an SSH connector or approval-file step in host-confirmed mode.
 5. Report verified, partial, stale or uncertain outcomes. Inspect an uncertain result before proposing anything further. Do not repeat an action merely because the transport timed out.
 
-Target/settings changes require a new preview and confirmation. The host-confirmed execution path binds plans to configuration and prior state, checks expiry at dispatch and consumes execution claims once. The activation-deadline gap below limits that guarantee for new managed rules. A repeated apply may return a recorded result, but must not dispatch the mutation again. Pending plans disappear on restart; the persistent consumption ledger must remain intact. These guards do not make concurrent external changes atomic or prove effective traffic enforcement.
+Target/settings changes require a new preview and confirmation. The host-confirmed execution path binds plans to configuration and prior state, checks expiry at dispatch and consumes execution claims once. Managed-rule creation also checks the deadline again before activation; an expired plan leaves a verified new rule disabled and reports a partial outcome. A repeated apply may return a recorded result, but must not dispatch the mutation again. Pending plans disappear on restart; the persistent consumption ledger must remain intact. These guards do not make concurrent external changes atomic or prove effective traffic enforcement.
 
 ## Which tools use which approval?
 
@@ -42,7 +42,7 @@ Only registered router-local inputs are accepted; credentials/config contents ar
 
 `cancel_capture` requests termination of an existing job and does not require another preview or approval artifact. Poll `capture_status` for actual completion; the remote timeout remains a cleanup backstop. Repeated `start_capture` for an existing job returns its status rather than starting another capture. `capture_status` is read-only.
 
-Capture is host-confirmed regardless of the general writer's legacy operator-file mode. Its plan expires after two minutes; it is limited to 15 seconds/100 packets and one explicit IP or MAC on an explicit interface. Starting an external probe is a separate action outside this server. See [capture limits](traffic-capture.md).
+Capture always uses host-confirmed scope approval. Its plan expires after two minutes; it is limited to 15 seconds/100 packets and one explicit IP or MAC on an explicit interface. Starting an external probe is a separate action outside this server. See [capture limits](traffic-capture.md).
 
 ### Verification and proposals do not apply changes
 
@@ -51,8 +51,6 @@ Capture is host-confirmed regardless of the general writer's legacy operator-fil
 ### Rollback is conditional, not a general undo
 
 Single-action rollback requires a verified applied change, an unexpired rollback window and the expected complete after-state. It returns a new plan. VPN lifecycle start/stop and mapping batches have no exact rollback through `preview_rollback`; inspect and preview a separate compensating operation. Mixed plans have no exposed inverse/resume, and the import MCP surface has no rollback tool. Never remove or overwrite state changed by another actor.
-
-One existing tool description, `preview_rollback`, still says “new operator approval.” That is legacy wording: the implementation uses the configured general confirmation mode, including host-confirmed mode. It does not require an external issuer in host-confirmed mode. This documentation audit did not change the runtime schema.
 
 ## Multiple actions and partial outcomes
 
@@ -68,16 +66,19 @@ This is not an atomic transaction. On failure, report completed and unverified s
 
 Use [installation](install.md) and [write setup](writes.md) for mounts and restricted SSH helpers. Enabling broader catalogs is a deliberate permission expansion, not part of refreshing client metadata. The configuration field named `vpn_target_policy` concerns VPN target selection; it is not the name of the entire approval system. General host-confirmed writers use their own mode and retain operation-specific restrictions such as allowed kernel tables/chains and registered import inputs.
 
-**The authenticated host enforces the human confirmation.** An authenticated client that ignores the workflow can call apply without asking; the server does not attest the human reply. MCP annotations are hints, not mandatory UI enforcement. Exact plan/state/replay checks still run server-side. Use only trusted clients, private authenticated access and reviewed router command gates. The [VPN trust-model detail](host-confirmed-vpn.md) explains that boundary further.
+**The authenticated host enforces the human confirmation.** An authenticated client that ignores the workflow can call apply without asking; the server does not attest the human reply. MCP annotations are hints, not mandatory UI enforcement. Exact plan/state/replay checks still run server-side. Use only trusted clients, private authenticated access and reviewed router command gates. The [VPN trust-model detail](approvals.md) explains that boundary further.
 
-Legacy `operator` mode remains in code, but the independent review below found a trust-validation gap in some paths. Do not use it as an alternative security boundary until corrected and verified. It is not the normal host-confirmed setup. The superseded external-issuer deployment narrative has been removed from the current guide; repository history retains it. No new issuer, credential or external SSH approval step is needed for host-confirmed operation.
+## Migrating from file-based approval
 
-## Known implementation gaps under review
+File-based/operator approval and its external issuer have been removed. Configurations containing `approval_directory`, `approval_issuer`, `trusted_approval_uid` or an `operator` confirmation mode are rejected with a migration error, even when the fields are null. Enabling writes without explicitly selecting `host_confirmed` is also rejected. No old configuration silently changes its trust model.
 
-These findings concern the current source; this documentation update does not fix runtime behavior:
+To migrate deliberately:
 
-- **Legacy operator/allowlist paths:** general operator-mode execution can bypass the trusted-issuer UID validation and separate consumption ledger used by the approval-bound operator path. It also links/unlinks inside the approval inbox. The reviewer reproduced acceptance of a server-UID-created artifact despite a different configured trusted issuer. Legacy allowlist VPN/import paths are affected too. Do not rely on those paths to separate issuer and executor. This is distinct from the intentionally host-trusting `host_confirmed` model.
-- **New managed-rule activation:** the router checks the deadline before creating a disabled rule, but does not recheck immediately before enabling it. Activation can therefore occur after approval expiry if creation runs long. Treat this writer as pending correction before production enablement; an apply-time expiry check is not a guaranteed per-step deadline.
-- **Legacy issuer script:** `scripts/issue_vpn_approval.py` contains a deployment-specific inbox path and group ID. It is not a portable installer and is not part of the recommended host-confirmed workflow.
+1. Accept the authenticated-host confirmation boundary described above and configure the host to show exact previews before applying.
+2. Remove the obsolete issuer/inbox fields and mounts from the candidate configuration. Explicitly set `write_confirmation_mode` and/or `vpn_confirmation_mode` to `host_confirmed` for the writers you enable. VPN writes also require `vpn_target_policy: "approval_bound"`.
+3. Preserve the private durable `approval_consumed_directory` and `audit_file` mounts. These are execution/replay records, not independent approval files. Do not erase claims or import old pending plans; obtain fresh previews after restart.
+4. Review and test the new backend and matching router helper hashes before a separately authorized deployment. Refresh the same gateway/client catalog afterward.
 
-The stale `preview_rollback` tool wording noted above is a separate documentation/schema issue. No runtime fix or broader deployment is implied by this guide. See [support status](features.md) and verify fixes before enabling affected paths.
+Removing the feature from this repository does not delete an installed helper, inbox or credential on a live host. Any live cleanup is separate administration and must preserve unrelated data. The internal VPN import journal/transaction marker remains an implementation safeguard on the router, created only by the controlled dispatch path after the MCP execution claim; it is not a user-managed approval issuer or an alternative authorization mode.
+
+The former legacy issuer-validation bypass is removed with those execution paths. New managed-rule activation rechecks expiry immediately before enabling; expiration after disabled creation returns `partial_expired`, preserves that disabled rule and dispatches neither enable nor cleanup. Inspect this outcome before a new plan. No live mutation or deployment is implied by these source changes.

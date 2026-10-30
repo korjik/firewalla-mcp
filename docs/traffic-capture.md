@@ -1,6 +1,6 @@
 # Bounded packet-header capture
 
-Deployed in the reference47-tool service; no live capture performed. Optional
+Optional
 `capture_enabled=true` adds `preview_capture`, `start_capture`, `capture_status`
 and `cancel_capture`. Disabled by default; existing catalogs do not gain capture
 permissions implicitly. SSH is internal to the MCP server.
@@ -48,7 +48,7 @@ WAN and VPN ingress. A WAN success does not establish VPN forwarding. An observe
 VPN SYN/RST shows packets reached that observation point; it does not alone identify
 which host/service emitted the reset or prove a missing NAT rule. Correlate with
 mapping/kernel/return-path diagnostics. A home-path timeout is not global closure.
-No packet trace from another chat is treated as verified evidence by this candidate.
+Only report packet evidence actually observed by the current diagnostic session.
 
 ## Cleanup and permissions
 
@@ -66,17 +66,4 @@ applies. Capture jobs/results are transient and are lost on backend restart.
 
 ## Installation boundary
 
-Approve backend capture opt-in, existing private ledger/audit mounts, the reviewed
-capture-helper pin and narrowly scoped root-capture gate branch, plus refresh of
-these four tools in the same MCP gateway integration. Do not enable the pending
-network-write gate or any unrelated operation as a side effect. The candidate
-capture gate starts from the existing VPN gate; it does not allow persistent-forward
-or generic writes. No new keys/credentials, sudo grants or OAuth provider identities are part
-of this proposal. If existing sudo cannot run the exact helper, report that blocker;
-do not broaden it automatically. A real capture needs a separate exact-scope host
-confirmation; implementation/deployment approval is not capture authorization.
-
-Tests use synthetic frames and a fake tcpdump executable: parsing, payload redaction,
-invalid/injected arguments, real subprocess cancellation/timeout cleanup, permission
-failure, empty/drop/truncated results, transport timeout and concurrency. They do
-not establish actual router capture availability or observed network behavior.
+Enable `capture_enabled`, persistent execution/audit storage and the restricted pinned capture helper as described in [installation](install.md) and [router command restrictions](writes.md#restricted-router-key). This does not enable unrelated network writers. Verify metadata schemas, authentication and cleanup using isolated tests first. No real capture acceptance test is claimed by the project; a real capture needs confirmation of its own scope. Capture configuration is not authorization to start collecting traffic.

@@ -50,20 +50,6 @@ class ForwardAction(BaseModel):
     external_port: Port
     destination_port: Port
 
-class ApprovalIssuer(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    ssh_host: Name
-    python: str
-    script: str
-
-    @field_validator("python", "script")
-    @classmethod
-    def safe_executable_path(cls, value):
-        import re
-        if not re.fullmatch(r"/[a-zA-Z0-9_./-]{1,240}", value) or ".." in Path(value).parts:
-            raise ValueError("Bounded absolute executable path required")
-        return value
-
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sites: dict[Name, Site]
@@ -77,17 +63,32 @@ class Config(BaseModel):
 
     def resolve(self, name):
         return self.aliases.get(name, name)
-    write_confirmation_mode: Literal["operator", "host_confirmed"] = "operator"
+    write_confirmation_mode: Literal["host_confirmed"] | None = None
     capture_enabled: bool = False
     writes_enabled: bool = False
     vpn_writes_enabled: bool = False
-    vpn_confirmation_mode: Literal["operator", "host_confirmed"] = "operator"
+    vpn_confirmation_mode: Literal["host_confirmed"] | None = None
     vpn_target_policy: Literal["allowlist", "approval_bound"] = "allowlist"
     approval_consumed_directory: str | None = None
-    approval_issuer: ApprovalIssuer | None = None
-    trusted_approval_uid: Annotated[int, Field(ge=0, strict=True)] = 0
-    approval_directory: str | None = None
     audit_file: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_approval(cls, value):
+        if isinstance(value, dict):
+            removed = {"approval_directory", "approval_issuer", "trusted_approval_uid"}
+            if removed.intersection(value) or any(value.get(k) == "operator" for k in ("write_confirmation_mode", "vpn_confirmation_mode")):
+                raise ValueError("File-based/operator approval was removed. Migrate explicitly to host_confirmed with a trusted MCP host and persistent execution ledger; remove legacy issuer/inbox fields. No automatic migration.")
+            for flag, mode in (("writes_enabled", "write_confirmation_mode"), ("vpn_writes_enabled", "vpn_confirmation_mode")):
+                if value.get(flag) is True and value.get(mode) != "host_confirmed":
+                    raise ValueError("Writes require explicit host_confirmed opt-in; review the migration guide before enabling.")
+        return value
+
+    @model_validator(mode="after")
+    def explicit_host_mode(self):
+        if (self.writes_enabled and self.write_confirmation_mode != "host_confirmed") or (self.vpn_writes_enabled and self.vpn_confirmation_mode != "host_confirmed"):
+            raise ValueError("Writes require explicit host_confirmed migration; no automatic trust-model switch")
+        return self
 
     def target(self, site: str, address: str):
         site = self.resolve(site)

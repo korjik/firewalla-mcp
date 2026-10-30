@@ -1,8 +1,7 @@
 # Practical prompts and tool calls
 
 Examples use fictional box labels and documentation-safe addresses. Check the
-server's advertised schema: the running deployment may lag local source. The
-People and saved-profile tools below are deployed in inventory-v1.
+server's advertised schema: the running deployment may lag local source.
 
 ## Rules
 
@@ -107,4 +106,4 @@ When the separately reviewed combined catalog is actually enabled,
 `preview_network_plan` can enumerate start → device switch → TCP/UDP forwards.
 One confirmation binds that exact ordered plan. Stop on partial/uncertain failure;
 do not claim atomic rollback or automatically execute external app operations.
-The reference47-tool deployment does not expose this candidate.
+The VPN-only catalog does not expose this combined-plan candidate.

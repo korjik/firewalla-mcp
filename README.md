@@ -29,7 +29,7 @@ This unofficial community project connects directly to your Firewalla appliances
 | Optional capture | Preview, start, status and cancel; explicit scope; at most **15 seconds / 100 packets**, metadata only |
 | Optional writes | VPN lifecycle, device VPN switching and registered inactive profile imports; source-supported rules, controls, DNS answers, VPN forwarding and compound plans |
 
-**Availability depends on configuration and firmware.** Default startup exposes inspection tools, not executable writes. Some write adapters are source-supported candidates rather than deployed or live-enforcement-tested features. The [support matrix](docs/features.md) records that distinction; the [complete tool reference](docs/tool-reference.md) lists every tool, argument and limit.
+**Availability depends on configuration and firmware.** Default startup exposes inspection tools, not executable writes. DNS/TCP diagnostics still generate network traffic; read-only does not mean passive. Some write adapters are source-supported candidates rather than deployed or live-enforcement-tested features. The [support matrix](docs/features.md) records that distinction; the [complete tool reference](docs/tool-reference.md) lists every tool, argument and limit.
 
 This is not full Firewalla app parity. Permanent route management, arbitrary existing-rule editing, RADIUS enrollment and complete historical analytics are not supported. Temporary kernel routes/rules are explicitly separate from persistent Firewalla-managed configuration.
 
@@ -169,7 +169,7 @@ In opt-in **host-confirmed** mode:
 3. **Apply:** the Firewalla MCP server checks the plan and executes through its internal SSH transport.
 4. **Verify:** inspect per-step results and any unresolved outcome before taking further action.
 
-Host-confirmed execution enforces target/settings binding, apply-time expiry, one-time use, expected-state checks and supported-operation/firmware boundaries. Review the [known implementation gaps](docs/approvals.md#known-implementation-gaps-under-review) before enabling candidate managed-rule writers or legacy operator mode. **The host enforces human confirmation; the server does not independently attest your reply.** Only use this mode with a trusted authenticated client. No external approval-file or SSH-plugin step is required. See the [trust model](docs/host-confirmed-vpn.md).
+Host-confirmed execution enforces target/settings binding, apply-time expiry, one-time use, expected-state checks and supported-operation/firmware boundaries. Existing file-based approval configurations require an explicit [migration](docs/approvals.md#migrating-from-file-based-approval). **The host enforces human confirmation; the server does not independently attest your reply.** Only use this mode with a trusted authenticated client. No external approval-file or SSH-plugin step is required. See the [trust model](docs/approvals.md).
 
 A multi-action plan can bind supported VPN start → device switch → forwarding steps to one approval. It is not an atomic transaction: execution stops on unexpected failure and reports partial results. Material changes require a fresh preview; rollback is conditional where supported, not a promise to undo concurrent edits or external application actions.
 
@@ -185,7 +185,7 @@ Capture has its own scope confirmation and strict limits. It returns timestamps,
 
 The Docker host and router architectures are independent. The amd64 container build/runtime was tested; ARM container execution is unverified. Both checked routers provide iptables and lack nft. No blanket compatibility, real capture acceptance test or reboot-persistence/enforcement certification is claimed.
 
-The default catalog has 36 inspection tools; opt-in VPN, VPN + capture and combined write + capture configurations expose 43, 47 and 61 respectively. These counts describe registration, not authorization or live validation. The reference deployment exposes VPN + capture; newer general write adapters remain source candidates. Consult the [support matrix](docs/features.md) and [validation record](docs/validation.md) before enabling a feature.
+The default catalog has 36 inspection tools; opt-in VPN, VPN + capture and combined write + capture configurations expose 43, 47 and 61 respectively. These counts describe registration, not authorization or live validation. A running server may expose a smaller catalog than the source; general managed-write adapters still require live enforcement validation. Consult the [support matrix](docs/features.md) and [validation record](docs/development/validation.md) before enabling a feature.
 
 ## Documentation
 
@@ -208,6 +208,8 @@ The default catalog has 36 inspection tools; opt-in VPN, VPN + capture and combi
 
 ## Development
 
+See [contributor guidance](CONTRIBUTING.md) for validation, firmware contracts and import internals.
+
 ```sh
 .venv/bin/pip install -e '.[test]'
 .venv/bin/pytest -q
@@ -217,6 +219,6 @@ python3 -m compileall -q src scripts
 
 CI tests mocked SSH/contracts, input validation and stdio/HTTP containers, plus isolated kernel changes without router credentials. Local tests do not prove live firmware behavior. Keep private keys, real VPN profiles, traffic and deployment-specific identifiers out of contributions.
 
-For related projects and the feature comparison, see the [SSH parity roadmap](docs/ssh-parity-roadmap.md). This project's backend remains SSH-only.
+For related projects and the feature comparison, see the [SSH parity roadmap](docs/development/ssh-parity-roadmap.md). This project's backend remains SSH-only.
 
 [MIT license](LICENSE) · [Report an issue](https://github.com/korjik/firewalla-mcp/issues)

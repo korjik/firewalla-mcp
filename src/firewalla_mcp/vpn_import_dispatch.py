@@ -171,7 +171,7 @@ class ImportDispatcher:
                 need(journal["approval_digest"] == request["approval_digest"], "Approval digest mismatch")
                 need(journal["phase"] == "planned", "Already attempted; inspect instead of retry")
                 # Host approval was consumed by the MCP manager. SSH forced command is
-                # the operator-approved authority to create this exact router approval.
+                # the host-confirmed, ledger-claimed authority for this internal transaction marker.
                 tool.write_stage(tx + ".approval", encoded({"transaction":tx,"operation":"apply","digest":request["approval_digest"]}))
             return {"status":"ok", "data":tool.apply(tx)}
         finally: tool.close()

@@ -22,5 +22,5 @@ services:
     # Loopback only. Verify actual port availability before deployment.
     ports: ["127.0.0.1:8000:8000"]
     # For a gateway on a separate container network, attach its trusted network
-    # after infrastructure review; register http://firewalla-read:8000/mcp.
+    # with the exact allowed Host and backend bearer configured; register http://firewalla-read:8000/mcp.
     # Remove published ports if the gateway shares this private network.

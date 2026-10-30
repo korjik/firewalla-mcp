@@ -9,12 +9,12 @@ from test_approval_bound_vpn import approved_config, Appliance, LIFE
 @pytest.fixture
 def host_config(approved_config):
     config,_=approved_config
-    return config.model_copy(update={'vpn_confirmation_mode':'host_confirmed','approval_directory':None,'approval_issuer':None})
+    return config.model_copy(update={'vpn_confirmation_mode':'host_confirmed'})
 
 async def test_mcp_preview_then_apply_no_external_issuer(host_config):
     router=Appliance();server=build_server(host_config,transport=router,vpn_write_catalog=True)
     r=await server.call_tool('preview_vpn_lifecycle',dict(box_name='Router A',profile='profile_a',vpn_type='openvpn',desired='connect'))
-    p=r[1];assert p['approval_document'] is None and p['approval_file'] is None
+    p=r[1];assert 'approval_document' not in p and 'approval_file' not in p
     assert p['next_step']['mechanism']=='trusted_mcp_host' and 'ssh_command' not in p['next_step']
     assert router.mutations==0
     # Represents an authenticated host apply AFTER host confirmation. The server
@@ -56,6 +56,6 @@ async def test_no_unknown_plan_or_general_operation(host_config):
     with pytest.raises(ValueError,match='Unknown box'):await m.preview('unconfigured',LIFE)
 
 def test_mode_is_opt_in_and_requires_ledger(host_config):
-    assert Config.model_fields['vpn_confirmation_mode'].default=='operator'
+    assert Config.model_fields['vpn_confirmation_mode'].default is None
     c=host_config.model_copy(update={'approval_consumed_directory':None})
     with pytest.raises(ValueError,match='ledger'):build_server(c,transport=Appliance(),vpn_write_catalog=True)

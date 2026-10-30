@@ -194,13 +194,11 @@ def test_management_no_redirect_or_error_body(monkeypatch,code):
 
 async def test_manager_approval_and_rollback_binding(tmp_path):
     site=Site(host='192.0.2.1',identity_file='/key',known_hosts_file='/known',vantage_group='a',management_revision=remote.MANAGEMENT_REVISION,managed_devices=[MAC])
-    config=Config(sites={'router-a':site},writes_enabled=True,approval_directory=str(tmp_path),audit_file=str(tmp_path/'audit'))
+    config=Config(sites={'router-a':site},writes_enabled=True,approval_consumed_directory=str(tmp_path),write_confirmation_mode="host_confirmed",vpn_confirmation_mode="host_confirmed",vpn_target_policy="approval_bound",audit_file=str(tmp_path/'audit'))
     transport=AsyncMock();transport.run.return_value={'status':'ok','data':{'fingerprint':'a'*64,'present':False,'field':{'state':False}}}
     manager=WriteManager(config,transport)
     plan=await manager.preview('router-a',dict(FEATURE))
     assert plan['scope']=='persistent_managed' and plan['diff']['before']=={'state':False}
-    with pytest.raises(ValueError,match='approval'):await manager.apply(plan['plan_id'])
-    Path(plan['approval_file']).write_text(json.dumps(plan['approval_document']))
     transport.run.return_value={'status':'ok','data':{'outcome':'applied','state':{'fingerprint':'b'*64,'present':True},'context':{'before':{'state':False}}}}
     await manager.apply(plan['plan_id'])
     assert transport.run.call_args.args[1]=='managed_write'
@@ -212,11 +210,11 @@ async def test_manager_approval_and_rollback_binding(tmp_path):
 
 async def test_managed_gate_requires_revision_and_device(tmp_path):
     site=Site(host='192.0.2.1',identity_file='/key',known_hosts_file='/known',vantage_group='a')
-    config=Config(sites={'router-a':site},writes_enabled=True,approval_directory=str(tmp_path),audit_file=str(tmp_path/'audit'))
+    config=Config(sites={'router-a':site},writes_enabled=True,approval_consumed_directory=str(tmp_path),write_confirmation_mode="host_confirmed",vpn_confirmation_mode="host_confirmed",vpn_target_policy="approval_bound",audit_file=str(tmp_path/'audit'))
     transport=AsyncMock();manager=WriteManager(config,transport)
     with pytest.raises(ValueError,match='revision'):await manager.preview('router-a',dict(FEATURE))
     site.management_revision=remote.MANAGEMENT_REVISION
-    with pytest.raises(ValueError,match='allowlist'):await manager.preview('router-a',dict(FEATURE))
+    assert manager.validate('router-a',dict(FEATURE))==site
     transport.run.assert_not_called()
 
 @pytest.mark.parametrize('payload',[

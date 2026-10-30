@@ -19,7 +19,7 @@ def config(tmp_path):
     approvals=tmp_path/'approvals'; approvals.mkdir(mode=0o700)
     return Config(sites={'router-a':Site(host='192.0.2.1', identity_file='/secrets/key',known_hosts_file='/secrets/known_hosts',
         vantage_group='a', vpn_import_sources=['source'], vpn_import_archives=['sample'])},aliases={'Router A':'router-a'},
-        vpn_writes_enabled=True,approval_directory=str(approvals),audit_file=str(tmp_path/'audit'))
+        vpn_writes_enabled=True,approval_consumed_directory=str(approvals),write_confirmation_mode="host_confirmed",vpn_confirmation_mode="host_confirmed",vpn_target_policy="approval_bound",audit_file=str(tmp_path/'audit'))
 
 
 class Observer:
@@ -42,7 +42,7 @@ def dispatcher(sandbox,tmp_path,monkeypatch):
     for suffix,content in [('zip',raw),('json',json.dumps(manifest).encode())]:
         file=registry/('sample.'+suffix);file.write_bytes(content);file.chmod(0o600)
     secure=tmp_path/'ssh';secure.mkdir(mode=0o700)
-    policy=secure/'policy.json';policy.write_text(json.dumps(dict(revision='a'*40,sources={'source':False},archives=['sample'],destination_modes=['0600','0644'],provider_features=False)));policy.chmod(0o600)
+    policy=secure/'policy.json';policy.write_text(json.dumps(dict(revision='a'*40,target_policy='approval_bound',source_permission_modes=['owner_only','existing_0644'],sources={'source':False},archives=['sample'],destination_modes=['0600','0644'],provider_features=False)));policy.chmod(0o600)
     d=ImportDispatcher(root,policy,runner=lambda argv:'a'*40 if 'rev-parse' in argv else '',observer=Observer)
     return d,root,values
 
@@ -54,10 +54,6 @@ class LocalRPC:
         return self.dispatcher.execute(request)
 
 
-def approve(config,plan):
-    from pathlib import Path
-    path=Path(config.approval_directory)/(plan['plan_id']+'.json')
-    path.write_text(json.dumps(plan['approval_document']));path.chmod(0o600)
 
 
 async def test_real_transaction_through_mcp(config,dispatcher):
@@ -69,7 +65,6 @@ async def test_real_transaction_through_mcp(config,dispatcher):
     assert plan['box']=='router-a' and plan['preview']['destination_mode']=='0644'
     assert 'synthetic-password' not in json.dumps(plan)
     assert digest(values['userpass']) not in json.dumps(plan)
-    approve(config,plan)
     applied=await server.call_tool('apply_vpn_import',dict(plan_id=plan['plan_id']))
     data=applied[1]['data']; assert data['state']=='imported_unassigned_passive_checks'
     for pid in data['profiles']:
@@ -106,14 +101,15 @@ async def test_approval_required_and_expired_window(config,dispatcher):
     d,_,_=dispatcher;rpc=LocalRPC(d); manager=ImportManager(config,rpc)
     with pytest.raises(ValueError,match='deadline'): await manager.preview_import('router-a','source','sample','0644',int(time.time())-1)
     plan=await manager.preview_import('router-a','source','sample','0600',int(time.time())+300)
-    with pytest.raises(ValueError,match='approval'): await manager.apply_import(plan['plan_id'])
+    manager.plans[plan['plan_id']]['expires_at']=0
+    with pytest.raises(ValueError,match='expired'): await manager.apply_import(plan['plan_id'])
     assert len(rpc.calls)==1
 
 
 @pytest.mark.parametrize('field,value',[('source','../source'),('archive','../../etc/passwd'),('destination_mode','0666')])
 def test_dispatch_rejects_unregistered(config,dispatcher,field,value):
     d,_,_=dispatcher
-    request=dict(operation='preview',source='source',archive='sample',destination_mode='0644',maintenance_until=int(time.time())+300)
+    request=dict(operation='preview',target_policy='approval_bound',source='source',archive='sample',destination_mode='0644',maintenance_until=int(time.time())+300)
     request[field]=value
     with pytest.raises(ImportBlocked):d.execute(request)
 
@@ -132,7 +128,6 @@ async def test_stale_after_preview(config,dispatcher,change):
     if change=='password_appears':
         # Existing source password is present in this fixture: mutate it to prove source binding.
         (root/'source.password').write_bytes(b'changed')
-    approve(config,plan)
     with pytest.raises((ImportBlocked,ValueError)):await manager.apply_import(plan['plan_id'])
     assert manager.plans[plan['plan_id']]['status']=='uncertain'
     assert not any((root/(t['id']+'.ovpn')).exists() for t in plan['preview']['targets'])
@@ -142,14 +137,14 @@ async def test_stale_after_preview(config,dispatcher,change):
 async def test_transport_failure_never_retried(config,dispatcher):
     d,_,_=dispatcher;rpc=LocalRPC(d);manager=ImportManager(config,rpc)
     plan=await manager.preview_import('router-a','source','sample','0644',int(time.time())+300)
-    approve(config,plan);rpc.request=AsyncMock(return_value={'status':'unavailable'})
+    rpc.request=AsyncMock(return_value={'status':'unavailable'})
     await manager.apply_import(plan['plan_id']);again=await manager.apply_import(plan['plan_id'])
     assert again['status']=='uncertain';rpc.request.assert_awaited_once()
 
 
 def test_verify_detects_another_actor_change(dispatcher):
     d,root,_=dispatcher
-    plan=d.execute(dict(operation='preview',source='source',archive='sample',destination_mode='0644',maintenance_until=int(time.time())+300))['data']
+    plan=d.execute(dict(operation='preview',target_policy='approval_bound',source='source',archive='sample',destination_mode='0644',maintenance_until=int(time.time())+300))['data']
     d.execute(dict(operation='apply',transaction=plan['transaction'],approval_digest=plan['approval_digest']))
     (root/(plan['targets'][0]['id']+'.settings')).write_text('{}')
     with pytest.raises(ImportBlocked,match='changed'):d.execute(dict(operation='verify',transaction=plan['transaction']))

@@ -7,7 +7,7 @@ or live-enforcement tested by this release.
 
 ## Reviewed installed contracts
 
-The two revisions and shared tree in [firmware review](vpn-firmware-contract.md)
+The two revisions and shared tree in [firmware review](firmware-compatibility.md)
 now support the following additional kinds through `policy_source_guard`:
 
 - `managed_feature`: device Ad Block, Safe Search or Unbound.

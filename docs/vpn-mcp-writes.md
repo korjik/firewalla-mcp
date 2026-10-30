@@ -1,7 +1,5 @@
 # VPN-only MCP writes
 
-Private pilot deployment was verified on 2026-10-30: 43 tool schemas, router reads, authentication and unapproved-write rejection passed through the existing gateway. The reference deployment now uses approval-bound targets and host-confirmed execution; installation alone authorizes no mutation. No VPN mutation was used as a deployment test.
-
 The optional VPN catalog retains the same MCP endpoint and gateway identity. It
 contains 36 read tools plus seven VPN methods. It does not expose general route,
 firewall, device-control or service writes. Default stdio and HTTP remain read-only.
@@ -31,7 +29,7 @@ Use `--vpn-write-catalog`, `vpn_writes_enabled=true`, `writes_enabled=false`,
 protected ledger/audit mounts. The authenticated host obtains exact confirmation,
 then calls MCP apply directly. No external issuer or per-target list editing is
 required. Registered import sources/archives, firmware and SSH operation boundaries
-remain enforced. See [installation](install.md) and [trust model](host-confirmed-vpn.md).
+remain enforced. See [installation](install.md) and [trust model](approvals.md).
 
 ## Router import installation contract
 
@@ -55,12 +53,10 @@ The router dispatcher uses fixed account-relative paths:
 - `<archive_id>.zip` and `<archive_id>.json`: owner-only registered inputs.
 - `.mcp-import/`: mode0700 transaction journals and recovery artifacts.
 
-The operator policy has exactly `revision`, `sources` (profile ID to boolean
-allowing the reviewed legacy0644 userpass exception), `archives`,
-`destination_modes`, and `provider_features`. It requires an exact reviewed git revision/tree and 11 matching contract-file hashes.
+For host-confirmed approval-bound targets, the router policy has `revision`, `sources`, `archives`, `destination_modes`, `provider_features`, `target_policy: "approval_bound"` and `source_permission_modes`. The last field restricts `owner_only` and/or the bounded `existing_0644` source-file exception. Registered archive files remain mandatory; dynamic source/target selection is not arbitrary filesystem access. It requires an exact reviewed git revision/tree and 11 matching contract-file hashes.
 Only a valid string-dictionary edit to `locales/en.json` is tolerated for the
 reviewed VPN revisions; every other tracked edit fails closed. See the
-[firmware review](vpn-firmware-contract.md).
+[firmware review](firmware-compatibility.md).
 The manifest has `sha256` for the ZIP and `profiles`, each containing only
 `filename`, `display_name`, `endpoint`, and profile `sha256`. Labels/endpoints and
 all directives are validated again on the router. ZIP traversal, links, unknown
@@ -87,8 +83,7 @@ There is no automatic cleanup when another actor changes state. Import rollback
 remains a separate reviewed local recovery operation, not an MCP delete method.
 
 Lifecycle/switch adapters support the two exact VPN revisions documented in the
-[firmware review](vpn-firmware-contract.md). Other managed-write types retain the
-older pin and strict clean-tree requirement. Existing management routes must be
+[firmware review](firmware-compatibility.md). Additional device/app/DNS contracts have their own reviewed dependency pins; DoH/NTP remain blocked on the current revisions. Existing management routes must be
 reachable; none is enabled. Missing safety fields use the reviewed `loadSettings`
 defaults; explicit null, string or numeric values are rejected. Settings bytes are
 never rewritten, and fingerprints still bind the full stored settings file.
@@ -100,7 +95,7 @@ unit and updates routing/DNS runtime state. These effects are disclosed in previ
 There is no claim that a runtime start updates persistent system VPN policy.
 
 Deployment must separately approve the helper hash and narrow SSH operations,
-protected registry and approval mounts, and replacing the same backend image.
+protected registry and execution-ledger/audit mounts, and replacing the same backend image.
 Refresh the existing MCP gateway tool catalog and verify all seven schemas and
-rejected unapproved calls, then refresh tools in the existing ChatGPT app. No new
-OAuth provider client, audience, callback or integration is required. The private pilot received the separately approved narrow SSH gate expansion; no live VPN mutation was performed during deployment verification.
+rejected unknown/expired plans, then refresh tools in the existing ChatGPT app. No new
+OAuth provider client, audience, callback or integration is required.

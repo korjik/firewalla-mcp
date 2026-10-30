@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import re
 import secrets
-import stat
 import time
 from ipaddress import IPv4Address, IPv4Network
 
@@ -37,10 +36,8 @@ class WriteManager:
                        "target_policy":self.config.vpn_target_policy,
                        "confirmation_mode":self.config.vpn_confirmation_mode,
                        "general_confirmation_mode":self.config.write_confirmation_mode,
-                       "approval_directory":self.config.approval_directory,
                        "approval_consumed_directory":self.config.approval_consumed_directory,
-                       "trusted_approval_uid":self.config.trusted_approval_uid,
-                       "approval_issuer":self.config.approval_issuer.model_dump() if self.config.approval_issuer else None})
+                       "audit_file":self.config.audit_file})
 
     def check_plan(self, plan):
         material={k:v for k,v in plan.items() if k not in ("digest","status","result")}
@@ -52,23 +49,12 @@ class WriteManager:
     def enabled(self):
         if not self.config.writes_enabled:
             raise ValueError("Writes disabled. Operator must enable writes and configure host approvals.")
-        if self.host_confirmed():
-            from .host_confirmation import validate_ledger
-            if not self.approval_bound_targets():raise ValueError("Host-confirmed VPN mode requires approval-bound targets")
-            if not self.config.audit_file or not Path(self.config.audit_file).is_absolute():raise ValueError("Absolute audit path required")
-            validate_ledger(self.config)
-            return
-        if not self.config.approval_directory or not self.config.audit_file:
-            raise ValueError("Approval directory and audit file required")
-        directory=Path(self.config.approval_directory)
-        if not directory.is_absolute() or not Path(self.config.audit_file).is_absolute():
-            raise ValueError("Absolute approval/audit paths required")
-        info=directory.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o022:
-            raise ValueError("Approval directory must not be a symlink or group/world writable")
-        if self.approval_bound_targets():
-            from .operator_approval import OperatorApproval
-            OperatorApproval(self.config).validate_storage()
+        if not self.host_confirmed():
+            raise ValueError("Writes require explicit host_confirmed migration; file-based approval is unsupported")
+        from .host_confirmation import validate_ledger
+        if not self.approval_bound_targets():raise ValueError("Host-confirmed VPN mode requires approval-bound targets")
+        if not self.config.audit_file or not Path(self.config.audit_file).is_absolute():raise ValueError("Absolute audit path required")
+        validate_ledger(self.config)
 
     def validate(self,box_name,spec):
         self.enabled()
@@ -155,12 +141,11 @@ class WriteManager:
         if context is not None:
             plan["context"]=context
         plan["site_binding"]=self.site_binding(box)
-        plan["target_authorization"]="trusted_mcp_host_confirmation" if self.host_confirmed() else "exact_operator_approval" if self.approval_bound_targets() else "allowlist_and_host_approval"
+        plan["target_authorization"]="trusted_mcp_host_confirmation"
         plan["digest"]=digest(plan)
         plan["status"]="pending"
         self.plans[plan_id]=plan
-        return {**copy.deepcopy(plan),"next_step":self.approval_next_step(plan) if self.approval_bound_targets() else None,"rollback":state.get("rollback","separate approved rollback preview"),"impact":state.get("scope","selected target only; inherited effects may apply"),"approval_file":None if self.host_confirmed() else str(Path(self.config.approval_directory)/(plan_id+".json")),
-                "approval_document":None if self.host_confirmed() else {"plan_id":plan_id,"digest":plan["digest"],"expires_at":plan["expires_at"],"approved":True},
+        return {**copy.deepcopy(plan),"next_step":self.approval_next_step(plan) if self.approval_bound_targets() else None,"rollback":state.get("rollback","separate approved rollback preview"),"impact":state.get("scope","selected target only; inherited effects may apply"),
                 "diff":{"operation":"apply" if mode=="apply" else "restore_exact_prior_state","object":copy.deepcopy(spec),"before":copy.deepcopy(state.get("field"))},
                 "warning":"Confirm the exact preview using the configured confirmation mode. Kernel changes may be overwritten. Managed state acknowledgment does not prove asynchronous enforcement. No automatic approval or retry. Concurrent external writers cannot be made atomic."}
 
@@ -191,38 +176,12 @@ class WriteManager:
 
     def approval_next_step(self, plan=None):
         from .approval_guidance import approval_guidance
-        return approval_guidance(self.config.model_copy(update={"vpn_confirmation_mode":"host_confirmed"}) if self.host_confirmed() else self.config, plan)
+        return approval_guidance(self.config, plan)
 
     def consume_approval(self,plan):
-        if self.host_confirmed():
-            from .host_confirmation import claim
-            return claim(self.config, plan)
-        if self.approval_bound_targets():
-            from .operator_approval import OperatorApproval, ApprovalRequired
-            try:
-                return OperatorApproval(self.config).consume(plan)
-            except ApprovalRequired:
-                raise ApprovalRequired(json.dumps({"error":"approval_required", "message":"Missing trusted operator approval. Invoke the configured issuer through authorized SSH after exact user confirmation, then retry this same MCP plan. Do not manufacture approval files.", "next_step":self.approval_next_step(plan)})) from None
-        path=Path(self.config.approval_directory)/(plan["plan_id"]+".json")
-        # Atomically claim one approval before reading; concurrent invocations cannot reuse it.
-        claimed=path.with_suffix(".used")
-        if claimed.exists():
-            raise ValueError("Approval already consumed")
-        try:
-            os.link(path,claimed,follow_symlinks=False)
-            path.unlink()
-            fd=os.open(claimed,os.O_RDONLY|os.O_NOFOLLOW)
-        except OSError:
-            raise ValueError("Missing or invalid operator approval") from None
-        try:
-            info=os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022 or info.st_size>4096:
-                raise ValueError("Unsafe approval file")
-            approval=json.loads(os.read(fd,4097))
-        finally:
-            os.close(fd)
-        if approval!={"plan_id":plan["plan_id"],"digest":plan["digest"],"expires_at":plan["expires_at"],"approved":True}:
-            raise ValueError("Approval does not match preview")
+        self.enabled()
+        from .host_confirmation import claim
+        return claim(self.config, plan)
 
     async def apply(self,plan_id):
         self.enabled()
@@ -237,7 +196,7 @@ class WriteManager:
             self.check_plan(plan)
             site=self.validate(plan["box"],plan["spec"]).model_copy(deep=True)
             self.consume_approval(plan)
-            self.audit(plan_id,"host_requested_attempt" if self.host_confirmed() else "approved_attempt",plan["box"])
+            self.audit(plan_id,"host_requested_attempt",plan["box"])
             plan["status"]="uncertain" # Cancellation/transport failure never permits automatic retry.
             result=await self.remote_write(site,plan["spec"],plan["mode"],plan["expected"],plan.get("context"),plan["expires_at"])
             plan["result"]=result

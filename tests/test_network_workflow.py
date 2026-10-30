@@ -24,7 +24,7 @@ class Router:
 
 @pytest.fixture
 def manager(approved_config):
- c,_=approved_config;c=c.model_copy(update={'writes_enabled':True,'write_confirmation_mode':'host_confirmed','approval_directory':None})
+ c,_=approved_config;c=c.model_copy(update={'writes_enabled':True,'write_confirmation_mode':'host_confirmed'})
  r=Router();return VPNWorkflowManager(c,r),r
 
 async def test_full_projected_sequence_one_plan_and_replay(manager):

@@ -204,7 +204,7 @@ Annotations: `{"destructiveHint": true, "idempotentHint": false, "openWorldHint"
 
 Catalogs: `vpn`, `vpn+capture`, `combined+capture`.
 
-Apply the exact VPN plan after confirmation using preview.next_step. In host_confirmed mode the authenticated MCP host must obtain explicit user confirmation, then call this tool directly. SSH is internal; no external SSH or file issuance is needed. The server does not attest consent. Legacy operator mode uses authorized SSH issuance described in next_step. Never bypass host denial or treat model-generated consent as confirmation.
+Apply the exact VPN plan after confirmation using preview.next_step. In host_confirmed mode the authenticated MCP host must obtain explicit user confirmation, then call this tool directly. SSH is internal; no external SSH or file issuance is needed. The server does not attest consent. Never bypass host denial or treat model-generated consent as confirmation.
 
 Annotations: `{"destructiveHint": true, "idempotentHint": false, "openWorldHint": true, "readOnlyHint": false}`
 
@@ -228,7 +228,7 @@ Annotations: `{"destructiveHint": true, "idempotentHint": false, "openWorldHint"
 
 Catalogs: `vpn`, `vpn+capture`, `combined+capture`.
 
-Apply an exact import preview after single-use host approval. Never starts/assigns a VPN. Follow preview.next_step. In host_confirmed mode obtain exact user confirmation in the MCP host, then call this tool directly; SSH stays internal. Legacy operator mode requires its configured issuer. Stop on host denial; never manufacture consent or approval files. Uncertain outcomes require inspection; never retry automatically. Credentials remain router-local.
+Apply an exact import preview after single-use host approval. Never starts/assigns a VPN. Follow preview.next_step. In host_confirmed mode obtain exact user confirmation in the MCP host, then call this tool directly; SSH stays internal. Stop on host denial; never manufacture consent or approval files. Uncertain outcomes require inspection; never retry automatically. Credentials remain router-local.
 
 Annotations: `{"destructiveHint": true, "idempotentHint": false, "openWorldHint": true, "readOnlyHint": false}`
 
@@ -1506,7 +1506,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `vpn`, `vpn+capture`, `combined+capture`.
 
-Preview persistent device VPN policy switch between existing profiles in the configured box. Exact device/profile IDs and current source are bound to operator approval; no name inference. Requires explicit enabled source policy, matching selected safety/DNS settings, existing OpenVPN/WireGuard profiles. No profile credentials read/imported or settings changed. Selected settings are inspected locally; live validation requires separate approval. Effective device routing remains unverified until independent traffic checks.
+Preview persistent device VPN policy switch between existing profiles in the configured box. Exact device/profile IDs and current source are bound to exact host confirmation; no name inference. Requires explicit enabled source policy, matching selected safety/DNS settings, existing OpenVPN/WireGuard profiles. No profile credentials read/imported or settings changed. Selected settings are inspected locally; live validation requires separate approval. Effective device routing remains unverified until independent traffic checks.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -1793,7 +1793,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+capture`.
 
-Preview removal of a verified addition while its complete snapshot is unchanged. Requires a new operator approval and apply_change call. Not a generic undo tool.
+Preview removal of a verified addition while its complete snapshot is unchanged. Requires fresh host confirmation and an apply_change call. Not a generic undo tool.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -2104,7 +2104,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": false, "openWorldHint
 
 Catalogs: `vpn`, `vpn+capture`, `combined+capture`.
 
-Preview profile-wide management start/stop for one existing VPN in the configured box. Target allowlists apply in legacy mode; approval-bound mode requires exact operator confirmation. Requires consistent cached/interface state; an absent cache with no interface is unknown, not already stopped. OpenVPN unit must already be disabled. May affect every device using profile; native start may restart its unit and stop disables it. No persistent system VPN policy is changed; no exact rollback. An inverse is a new approved change. Management may take 80 seconds; unknown outcomes never retry automatically.
+Preview profile-wide management start/stop for one existing VPN in the configured box. Approval-bound targets require exact confirmation by the authenticated host. Requires consistent cached/interface state; an absent cache with no interface is unknown, not already stopped. OpenVPN unit must already be disabled. May affect every device using profile; native start may restart its unit and stop disables it. No persistent system VPN policy is changed; no exact rollback. An inverse is a new approved change. Management may take 80 seconds; unknown outcomes never retry automatically.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 

@@ -102,9 +102,9 @@ async def test_new_revision_local_scope_gate(tmp_path):
     site=Site(host='192.0.2.1',identity_file='/key',known_hosts_file='/known',vantage_group='a',
         management_revision=remote.VPN_MANAGEMENT_REVISIONS[0],managed_vpn_profiles=['vpn-a'])
     manager=VPNWriteManager(Config(sites={'router-a':site},vpn_writes_enabled=True,
-        approval_directory=str(tmp_path),audit_file=str(tmp_path/'audit')),AsyncMock())
+        approval_consumed_directory=str(tmp_path),write_confirmation_mode="host_confirmed",vpn_confirmation_mode="host_confirmed",vpn_target_policy="approval_bound",audit_file=str(tmp_path/'audit')),AsyncMock())
     assert manager.validate('router-a',dict(LIFE))==site
-    with pytest.raises(ValueError,match='allowlist'):manager.validate('router-a',{**LIFE,'profile':'other'})
+    assert manager.validate('router-a',{**LIFE,'profile':'other'})==site
 
 
 def test_vpn_rollback_cannot_supply_other_policy_fields(monkeypatch):

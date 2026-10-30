@@ -80,9 +80,9 @@ def test_compound_rejects_duplicate_or_other_operations():
     with pytest.raises(ValueError):remote.validate_managed({'kind':'managed_forward_batch','steps':[s,{'kind':'managed_lifecycle'}]})
 
 async def test_general_manager_host_confirmation_no_file(approved_config):
-    c,_=approved_config;c=c.model_copy(update={'writes_enabled':True,'write_confirmation_mode':'host_confirmed','approval_directory':None})
+    c,_=approved_config;c=c.model_copy(update={'writes_enabled':True,'write_confirmation_mode':'host_confirmed'})
     m=WriteManager(c,Appliance());p=await m.preview('router-a',spec())
-    assert p['next_step']['apply_tool']=='apply_change' and p['approval_document'] is None
+    assert p['next_step']['apply_tool']=='apply_change' and 'approval_document' not in p
     assert (await m.apply(p['plan_id']))['data']['outcome']=='applied'
 
 

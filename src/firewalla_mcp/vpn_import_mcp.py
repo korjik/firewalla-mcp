@@ -62,11 +62,10 @@ class ImportManager(WriteManager):
             plan = dict(plan_id=secrets.token_hex(16), box=box, source=source, archive=archive,
                 destination_mode=destination_mode, expires_at=min(maintenance_until, public["expires"]),
                 transaction=tx, remote_digest=remote_digest, preview=copy.deepcopy(public),
-                site_binding=self.site_binding(box), target_authorization="trusted_mcp_host_confirmation" if self.host_confirmed() else "exact_operator_approval" if self.approval_bound_targets() else "allowlist_and_host_approval")
+                site_binding=self.site_binding(box), target_authorization="trusted_mcp_host_confirmation")
             plan["digest"] = digest(plan); plan["status"] = "pending"
             self.plans[plan["plan_id"]] = plan
-            return {**copy.deepcopy(plan), "next_step":self.approval_next_step(plan) if self.approval_bound_targets() else None, "approval_document": None if self.host_confirmed() else {"plan_id":plan["plan_id"], "digest":plan["digest"],
-                "expires_at":plan["expires_at"], "approved":True},
+            return {**copy.deepcopy(plan), "next_step":self.approval_next_step(plan) if self.approval_bound_targets() else None,
                 "warning":"Owner must avoid concurrent VPN/profile/policy edits until completion. Passive checks do not establish authoritative stopped intent. Follow the advertised confirmation mode."}
 
     async def apply_import(self, plan_id):
@@ -80,7 +79,7 @@ class ImportManager(WriteManager):
             self.check_plan(plan)
             _, site = self.site(plan["box"], plan["source"], plan["archive"])
             self.consume_approval(plan)
-            self.audit(plan_id, "import_host_requested_attempt" if self.host_confirmed() else "import_approved_attempt", plan["box"])
+            self.audit(plan_id, "import_host_requested_attempt", plan["box"])
             plan["status"] = "uncertain"
             result = await self.rpc.request(site, dict(operation="apply", transaction=plan["transaction"],
                 approval_digest=plan["remote_digest"]))

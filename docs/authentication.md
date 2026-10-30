@@ -59,13 +59,13 @@ Use an existing approved client/application where suitable. Configuration is pro
 
 Use the gateway's supported OAuth flow for the chosen MCP client. Check whether the client requires authorization discovery, resource metadata, PKCE or a particular registration method; do not assume the backend provides these. Keep client secrets, where required, in the gateway's approved secret store. Do not copy them into router configuration or tool outputs.
 
-Where explicitly requested and supported by the provider, a service can use a **180-day refresh-token absolute lifetime and inactivity window** (259200 minutes). This is an optional policy example, not a default or universal provider capability. Preserve short access-token lifetimes, rotation and MFA. Read back the actual policy and client assignment: a label or global setting does not prove it applies. Do not extend administrator sessions or alter unrelated applications as part of this setup.
+Choose token and session lifetimes through your gateway and identity-provider policies; this backend does not configure them. Keep access tokens short-lived, use appropriate refresh rotation and MFA, and verify the policy assigned to the intended client without changing unrelated applications.
 
 ## Catalogs and write confirmation
 
 Default stdio/HTTP exposes 36 read/inspection tools. Optional VPN + capture uses `--vpn-write-catalog` and the corresponding configuration for 47 tools; `writes_enabled=false` excludes general writers. See [installation](install.md) for flags/mounts and [support](features.md) for firmware limits. A schema is not proof of a working adapter or an authorized operation.
 
-In [host-confirmed mode](host-confirmed-vpn.md), the trusted authenticated MCP host shows the exact preview and obtains confirmation before apply. SSH stays internal; no external approval issuer is required. The server enforces plan/target/state/expiry/replay checks but does not independently attest a human reply. OAuth login alone does not enforce that conversational workflow. Only enable writes for clients whose confirmation behavior you trust and verify.
+In [host-confirmed mode](approvals.md), the trusted authenticated MCP host shows the exact preview and obtains confirmation before apply. SSH stays internal; no external approval issuer is required. The server enforces plan/target/state/expiry/replay checks but does not independently attest a human reply. OAuth login alone does not enforce that conversational workflow. Only enable writes for clients whose confirmation behavior you trust and verify.
 
 Keep one writer process per configured box set. Pending plans are in memory and lost on restart; persistent consumption-ledger and audit storage must survive upgrades. General combined writers require a separate review of permissions and source contracts.
 
@@ -80,4 +80,4 @@ Verify through the gateway:
 
 Retain the established integration/server IDs, endpoint, OAuth client, audience and callback when upgrading tools. Replace the private backend, refresh gateway discovery and tool associations, then refresh/review the existing client's tool catalog. Do not duplicate OAuth setup merely to add a tool. For ChatGPT, the action may appear under **Manage → Manage app → Refresh tools**, depending on the account/UI.
 
-Repository HTTP tests exercise real JSON-RPC initialize/list/call, catalog restrictions and missing/wrong/duplicate credentials, Host/Origin and query-token rejection. `tests/http_container_smoke.py` uses a disposable loopback container and test-only bearer, without router credentials. These tests do not certify a particular gateway/provider integration or live SSH access. Validate your actual deployment separately; see the [validation record](validation.md).
+Repository HTTP tests exercise real JSON-RPC initialize/list/call, catalog restrictions and missing/wrong/duplicate credentials, Host/Origin and query-token rejection. `tests/http_container_smoke.py` uses a disposable loopback container and test-only bearer, without router credentials. These tests do not certify a particular gateway/provider integration or live SSH access. Validate your actual deployment separately; see the [validation record](development/validation.md).

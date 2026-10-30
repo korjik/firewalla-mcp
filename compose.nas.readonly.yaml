@@ -1,5 +1,5 @@
 # Build first: DOCKER_BUILDKIT=0 docker build -f Dockerfile.legacy -t firewalla-mcp:local .
-# Copy to a reviewed runtime directory. Provision the dedicated token separately.
+# Copy to a private persistent runtime directory. Provision the dedicated token separately.
 services:
   firewalla-read:
     image: firewalla-mcp:local

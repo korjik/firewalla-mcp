@@ -22,25 +22,4 @@ are rejected. Limits: 128 profiles, 1024 directory entries, 32 endpoints/profile
 32 KB settings and 256 KB profile/config files. Malformed endpoint metadata is
 reported unavailable without raw errors.
 
-The initial live probe was rejected because bounded local file reads can contain
-inline secrets in memory. After explicit owner approval for that exact on-box
-projection, read-only validation succeeded on both tested appliances, including
-OpenVPN/WireGuard, absent interfaces and duplicate display names. No credentials
-were returned, logged or modified; no `.userpass`/`.password` files were read.
-
-The container presentation now separates `enabled` (unknown administrative intent),
-`connected` (cached value with unknown freshness), and `health` (passive assessment
-with check time/reason). Absent interface plus cached false is disconnected;
-other observations remain unknown, never automatically healthy. No handshake or
-provider probe is performed. The helper digest is unchanged by presentation.
-
-The new image built and passed an isolated 36-tool read-only catalog check, but
-replacing/restarting the live service was separately rejected by automatic review.
-Existing router gates were restored and the old deployment was verified working
-on both appliances. Exact service replacement approval remains outstanding.
-
-
-After exact service replacement approval, inventory-v1 was deployed successfully.
-Both inventories passed backend MCP and MCP gateway invocation checks on both
-appliances, including structured output. The earlier rejection is resolved;
-rollback artifacts remain available. No new OAuth consent round trip was tested.
+The presentation separates `enabled` (unknown administrative intent), `connected` (cached value with unknown freshness), and `health` (passive assessment with timestamp/reason). Absent interface plus cached false is disconnected; other observations remain unknown, never automatically healthy. No handshake or provider probe is performed. Bounded read projections have been checked on Gold Plus and Gold SE; see [support](features.md).

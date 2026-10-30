@@ -26,18 +26,19 @@ def main():
             targets = [{"id": "target_" + letter, "display_name": "Target " + letter,
                         "content": profile, "sha256": digest(profile), "endpoint": "vpn.example.test"} for letter in "abc"]
             plan = tool.plan("source", targets)
-            def synthetic_approval(preview, operation):
+            def transaction_marker(preview, operation):
+                # Internal router transaction safeguard, not an independent consent issuer.
                 path = root / ".mcp-import" / (preview["transaction"] + ".approval")
                 path.write_text(json.dumps({"transaction": preview["transaction"], "operation": operation, "digest": preview["approval_digest"]}))
                 path.chmod(0o600)
-            synthetic_approval(plan, "apply")
+            transaction_marker(plan, "apply")
             assert tool.apply(plan["transaction"])["state"] == "imported_inactive"
             assert tool.apply(plan["transaction"])["state"] == "already_imported"
             rollback = tool.rollback_plan(plan["transaction"])
-            synthetic_approval(rollback, "rollback")
+            transaction_marker(rollback, "rollback")
             assert tool.rollback(plan["transaction"])["state"] == "rolled_back"
             assert not list(root.glob("target_*"))
-            print("PASS: three synthetic inactive imports, idempotent apply, separately approved rollback; temporary files removed")
+            print("PASS: three synthetic inactive imports, idempotent apply, separate synthetic rollback transaction; temporary files removed")
             print("No network access, real credentials, router operations or live state claims")
         finally:
             tool.close()

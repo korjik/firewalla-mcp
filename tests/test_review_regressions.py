@@ -120,15 +120,13 @@ async def test_canonical_spec_precedes_approval_digest_and_approved_rollback(ups
     class Transport:
         async def run(self,site,op,args):return remote.execute(op,args)
     site=Site(host='192.0.2.1',identity_file='/key',known_hosts_file='/known',vantage_group='a',management_revision=remote.MANAGEMENT_REVISION,managed_devices=[MAC])
-    manager=WriteManager(Config(sites={'router-a':site},writes_enabled=True,approval_directory=str(tmp_path),audit_file=str(tmp_path/'audit')),Transport())
+    manager=WriteManager(Config(sites={'router-a':site},writes_enabled=True,approval_consumed_directory=str(tmp_path),write_confirmation_mode="host_confirmed",vpn_confirmation_mode="host_confirmed",vpn_target_policy="approval_bound",audit_file=str(tmp_path/'audit')),Transport())
     plan=await manager.preview('router-a',{**RULE,'rule_type':'dns','target':'ExAmPlE.ORG'})
     assert plan['spec']['target']=='example.org'
     internal=manager.plans[plan['plan_id']]
     assert plan['digest']==digest({k:v for k,v in internal.items() if k not in ('digest','status')})
-    Path(plan['approval_file']).write_text(json.dumps(plan['approval_document']))
     assert (await manager.apply(plan['plan_id']))['data']['outcome']=='applied'
     rollback=await manager.rollback_preview(plan['plan_id'])
-    Path(rollback['approval_file']).write_text(json.dumps(rollback['approval_document']))
     assert (await manager.apply(rollback['plan_id']))['data']['outcome']=='rolled_back'
     assert not upstream['policies']
 
@@ -150,3 +148,22 @@ def test_down_but_reconnecting_requires_approved_stop(lifecycle,monkeypatch,vpn_
     assert lifecycle['calls'][0][1]=='stopVpnClient'
     assert result['management_operation_acknowledged']=='disconnect'
     assert 'unverified' in result['administrative_intent']
+
+@pytest.mark.parametrize('elapsed',[10,11,601])
+def test_rule_expiry_after_creation_never_enables_or_deletes(upstream,monkeypatch,elapsed):
+    clock=[1000.0]
+    monkeypatch.setattr(remote.time,'time',lambda:clock[0])
+    original=remote.management_request
+    def delayed_create(*args,**kwargs):
+        result=original(*args,**kwargs)
+        if args[1]=='policy:create':clock[0]+=elapsed
+        return result
+    monkeypatch.setattr(remote,'management_request',delayed_create)
+    spec={**RULE,'rule_type':'dns','target':'example.org'}
+    before=preview(spec)
+    result=remote.managed_write(dict(mode='apply',revision=remote.MANAGEMENT_REVISION,spec=spec,
+        expected=before['fingerprint'],expires_at=1010))
+    assert result['outcome']=='partial_expired' and result['disabled_rule_verified']
+    assert result['context']['pid']=='123'
+    assert upstream['policies']['123']['disabled']=='1'
+    assert [item for item,_ in upstream['calls']]==['policy:create']

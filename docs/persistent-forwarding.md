@@ -86,7 +86,7 @@ steps and the stopped index, preserves uncertain state and requires inspection p
 a fresh exact remaining plan/confirmation. No automatic cross-step compensation is
 claimed. Workflow-created forwards do not yet have an exposed inverse-plan tool;
 removal requires separately reviewed native management action, not a fabricated
-rollback token. Single-forward plans retain their conditional rollback tool. Cross-plugin qBittorrent or external-probe operations may be included in a
+rollback token. Single-forward plans retain their conditional rollback tool. Cross-plugin external application configuration
 host-coordinated user preview, but Firewalla does not execute those other tools.
 Material changes or new steps require new confirmation. No live mixed plan tested.
 
@@ -125,7 +125,7 @@ bounded VPN self-address sets on-box, rejects overlap or an empty selected set, 
 binds that inventory into the plan. It does not return all set members. A disconnected
 profile with no observed tunnel address cannot pass this forwarding preview.
 
-Combined catalog rollout: enable both general and VPN write catalogs with
+Combined catalog rollout: select `--allow-write-catalog` and enable the required general/VPN configuration fields with
 `writes_enabled=true`, `write_confirmation_mode=host_confirmed`,
 `vpn_writes_enabled=true`, `vpn_confirmation_mode=host_confirmed`, and
 `vpn_target_policy=approval_bound`. The 57-tool combined catalog preserves the
