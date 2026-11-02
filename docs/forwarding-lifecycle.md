@@ -131,3 +131,7 @@ even across WANs. It checks native-shaped kernel hairpin evidence before removal
 and verifies its absence afterward. A later exact, verified replacement may own
 the same kernel tuple while the old stored identity must remain absent.
 These guards do not make native operations atomic against concurrent app edits.
+
+## Display names and app metadata
+
+Use `preview_forwarding_metadata` for exact HTTP/HTTPS display-name changes and separately opted-in removal of the default type field. Names are independent of journal-backed ownership, including after restart. Native metadata changes require a brief remove/recreate interruption and exact confirmation; policies remain unchanged. See [metadata workflow and recovery](development/forwarding-display-names.md).

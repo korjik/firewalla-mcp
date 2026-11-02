@@ -93,7 +93,7 @@ def adopt_mapping_removal(mappings, selection, dependency_report):
     if len(selected)!=1:raise ValueError('absent or ambiguous mapping identity')
     row=selected[0]
     allowed={'_type','active','description','dport','enabled','protocol','state','toIP','toMac','toPort','wanUUID'}
-    if set(row)!=allowed or row['_type']!='port_forward' or any(row[k] is not True for k in ('active','state','enabled')):raise ValueError('unsupported mapping shape/state')
+    if set(row)-{'_type'}!=allowed-{'_type'} or row.get('_type','port_forward')!='port_forward' or any(row[k] is not True for k in ('active','state','enabled')):raise ValueError('unsupported mapping shape/state')
     if row['toIP']!=checked['destination'] or row['toMac'].upper()!=checked['device'] or str(row['toPort'])!=str(checked['destination_port']):raise ValueError('destination drift')
     if not isinstance(row['description'],str) or not re.fullmatch('mcp:[a-f0-9]{32}',row['description']):raise ValueError('not an eligible MCP-tagged mapping')
     fingerprint=digest(row)

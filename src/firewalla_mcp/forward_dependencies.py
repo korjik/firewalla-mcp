@@ -94,7 +94,7 @@ def mapping_removal_dependencies(mapping, mappings):
     # Only the exact typed selector used by forward_value is supported. Never
     # emulate arbitrary wildcard deletion or coerce booleans/numeric selectors.
     required={'_type','active','description','dport','enabled','protocol','state','toIP','toMac','toPort','wanUUID'}
-    if set(mapping)!=required or mapping['_type']!='port_forward' or mapping['protocol']!='tcp':raise ValueError('Exact native removal selector required')
+    if set(mapping)-{'_type'}!=required-{'_type'} or mapping.get('_type','port_forward')!='port_forward' or mapping['protocol']!='tcp':raise ValueError('Exact native removal selector required')
     if not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}',mapping['wanUUID']):raise ValueError('Exact WAN required')
     if any(mapping[k] is not True for k in ('active','enabled','state')):raise ValueError('Active exact mapping required')
     target=str(IPv4Address(mapping['toIP']))
@@ -154,6 +154,9 @@ def hairpin_evidence(run,mapping):
     for line in lines:
         tokens=shlex.split(line)
         if tokens==['-N','FW_POSTROUTING_PORT_FORWARD']:continue
+        # Native install_iptables_setup.sh installs this unconditional tail
+        # dispatch. Exact mapping removal does not own or delete that chain.
+        if tokens==['-A','FW_POSTROUTING_PORT_FORWARD','-j','FW_POSTROUTING_DMZ_HOST']:continue
         if len(tokens)%2:raise ValueError('Unknown hairpin rule shape')
         pairs=list(zip(tokens[::2],tokens[1::2]));d=dict(pairs)
         if len(d)!=len(pairs) or set(d)-{'-A','-d','-p','-m','--dport','-j'}:raise ValueError('Unknown hairpin rule selectors')

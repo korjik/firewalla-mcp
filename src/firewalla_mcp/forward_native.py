@@ -32,14 +32,14 @@ class NativeForwardAdapter:
             raise ValueError('Native policy enforcement source drift')
 
     def mapping_spec(self,value):
-        if set(value)!={'_type','active','description','dport','enabled','protocol','state','toIP','toMac','toPort','wanUUID'}:
+        if set(value)-{'_type'}!={'active','description','dport','enabled','protocol','state','toIP','toMac','toPort','wanUUID'}:
             raise ValueError('Unsupported mapping shape')
-        if any(value[k] is not True for k in ('active','enabled','state')) or value['_type']!='port_forward':raise ValueError('Mapping state')
+        if any(value[k] is not True for k in ('active','enabled','state')) or value.get('_type','port_forward')!='port_forward':raise ValueError('Mapping state')
         if not re.fullmatch('mcp:[a-f0-9]{32}',value['description']):raise ValueError('Mapping provenance')
         spec={**self.template,'protocol':value['protocol'],'external_port':int(value['dport']),
               'destination_port':int(value['toPort']),'owner_token':value['description'][4:]}
         remote.validate_managed(spec)
-        if value!={**remote.forward_value(spec),'active':True}:raise ValueError('Mapping scope changed')
+        if {k:v for k,v in value.items() if k!='_type'}!={**remote.forward_value(spec),'active':True}:raise ValueError('Mapping scope changed')
         return spec
 
     def policy_value(self,row):
@@ -114,7 +114,7 @@ class NativeForwardAdapter:
                 replacements=[]
                 for current_key,current in state['objects'].items():
                     if not current_key.startswith('mapping:mcp:') or current['kind']!='mapping':continue
-                    if {k:v for k,v in current['value'].items() if k!='description'}=={k:v for k,v in row['value'].items() if k!='description'}:
+                    if {k:v for k,v in current['value'].items() if k not in ('description','_type')}=={k:v for k,v in row['value'].items() if k not in ('description','_type')}:
                         self.mapping_spec(current['value']);replacements.append(current)
                 if len(replacements)>1:return False
                 if not replacements and (remote.forward_kernel_evidence(spec)['nat_rule_observed'] or hairpin_evidence(remote.run,row['value'])):return False
@@ -142,10 +142,10 @@ class NativeForwardAdapter:
             elif op=='remove':
                 require_mapping_removal(value,snapshot['maps'])
                 if not hairpin_evidence(remote.run,value):raise ValueError('Native hairpin rule missing before removal')
-                if len(snapshot['owned'])!=1 or len(snapshot['collisions'])!=1 or not remote.forward_matches(snapshot['owned'][0],spec):raise ValueError('Mapping identity drift')
+                if snapshot['collisions']!=[value]:raise ValueError('Mapping identity drift')
             else:raise ValueError('Mapping operation')
             deadline()
-            remote.management_request('set','policy','0.0.0.0',{'portforward':remote.forward_value(spec,op!='remove')})
+            remote.management_request('set','policy','0.0.0.0',{'portforward':{**value,'state':op!='remove'}})
         else:
             if not step['key'].startswith('policy:mcp:') or self.policy_value(value)!=value:raise ValueError('Unsupported policy')
             if op in ('create_disabled','restore'):

@@ -50,3 +50,10 @@ def test_exact_hairpin_evidence_and_absence():
 @pytest.mark.parametrize('rules',[RULE+'\n'+RULE,RULE.replace('/32','/24'),RULE.replace('443','440:445'),RULE.replace('-p tcp -m tcp ','') ,RULE+' --comment arbitrary',RULE.replace('-j FW_POSTROUTING_HAIRPIN','-j ACCEPT'),RULE.replace('-d ','! -d ')])
 def test_ambiguous_kernel_evidence_blocks(rules):
     with pytest.raises(ValueError):hairpin_evidence(lambda a:rules,legacy_mapping())
+
+def test_native_dmz_tail_dispatch_preserved():
+    tail='-A FW_POSTROUTING_PORT_FORWARD -j FW_POSTROUTING_DMZ_HOST'
+    assert hairpin_evidence(lambda a:RULE+'\n'+tail,legacy_mapping())
+    assert not hairpin_evidence(lambda a:tail,legacy_mapping())
+    with pytest.raises(ValueError):
+        hairpin_evidence(lambda a:tail+' -d 192.0.2.1/32',legacy_mapping())

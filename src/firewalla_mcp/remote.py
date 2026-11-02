@@ -983,13 +983,14 @@ def forward_value(spec, state=True):
     return {"wanUUID":forward_scope(spec),"protocol":spec["protocol"],
             "dport":str(spec["external_port"]),"toPort":str(spec["destination_port"]),
             "toMac":spec["device"],"toIP":spec["destination_ip"],
-            "_type":"port_forward","enabled":True,"state":state,
+            "enabled":True,"state":state,
             "description":"mcp:"+spec["owner_token"]}
 
 
 def forward_matches(row,spec):
     desired=forward_value(spec)
-    return (all(row.get(k)==v for k,v in desired.items() if k not in ("dport","toPort"))
+    return (row.get("_type", "port_forward")=="port_forward"
+            and all(row.get(k)==v for k,v in desired.items() if k not in ("dport","toPort"))
             and forward_port_range(row.get("dport"))==(spec["external_port"],)*2
             and forward_port_range(row.get("toPort"))==(spec["destination_port"],)*2
             and row.get("active") is not False and not row.get("applyToAll") and not row.get("extIP"))

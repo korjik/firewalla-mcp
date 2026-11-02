@@ -121,6 +121,14 @@ class LifecycleAction(BaseModel):
         from ipaddress import IPv4Network
         return str(IPv4Network(value,strict=True))
 
+class ForwardMetadataChange(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    key: str
+    fingerprint: str
+    display_name: str
+    remove_default_type: bool = Field(strict=True)
+
+
 class LifecycleRemoval(BaseModel):
     model_config = ConfigDict(extra='forbid')
     key: Annotated[str,Field(pattern=r'^(mapping|policy):mcp:[a-f0-9]{32}$')]

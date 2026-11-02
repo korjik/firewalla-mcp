@@ -51,7 +51,8 @@ async def preview(adapter,box,binding,actions,removals=()):
         selection={'device':spec['device'],'destination':spec['destination_ip'],'interface_uuid':spec['interface_uuid'],
                    'protocol':spec['protocol'],'external_port':spec['external_port'],'destination_port':spec['destination_port'],
                    'expected_fingerprint':digest(row['value'])}
-        adopt_mapping_removal([r['value'] for r in initial['objects'].values() if r['kind']=='mapping'],selection,deps)
+        receipt_bound=any(r['key']==key and row['value'] in r['variants'] for r in getattr(adapter,'receipts',[]))
+        if not receipt_bound:adopt_mapping_removal([r['value'] for r in initial['objects'].values() if r['kind']=='mapping'],selection,deps)
         steps.append({'operation':'remove','key':key,'before':row,'after':None});del state['objects'][key]
     disabled_steps=[];mapping_steps=[];enable_steps=[]
     for action in actions:

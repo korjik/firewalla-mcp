@@ -5,7 +5,7 @@ from typing import Literal, Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import TypeAdapter
-from .models import Config, Name, BoxName, Port, Mac, ForwardAction, LifecycleAction, LifecycleRemoval
+from .models import Config, Name, BoxName, Port, Mac, ForwardAction, LifecycleAction, LifecycleRemoval, ForwardMetadataChange
 from .transport import SSHTransport
 from .writes import WriteManager
 from .analysis import summarize_page
@@ -106,6 +106,21 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             recovery. Never claim external reachability from stored or kernel state.
             """
             return await forwarding.apply(plan_id)
+
+        @mcp.tool(annotations=READ)
+        async def preview_forwarding_metadata(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, changes: list[ForwardMetadataChange], maintenance_until: int) -> dict[str, Any]:
+            """Preview one or two exact HTTP/HTTPS mapping metadata changes.
+            Select keys/fingerprints from inspect_forwarding_lifecycle. Explicitly
+            choose display_name and remove_default_type separately; renaming does
+            not authorize type removal. Private durable receipts preserve ownership
+            independently of labels. Native remove/recreate briefly interrupts each
+            selected port; failure can prolong it. Policies and other fields remain
+            unchanged. Show ordered changes and risks, obtain exact host confirmation,
+            then call apply_forwarding_lifecycle. Recovery survives restarts and
+            requires fresh preview/confirmation. No probes or app-visibility guarantee.
+            """
+            return await forwarding.preview_metadata(box_name,device,destination_ip,interface_uuid,[c.model_dump() for c in changes],maintenance_until)
 
         @mcp.tool(annotations=READ)
         async def preview_forwarding_recovery(transaction_id: str, rollback: bool,

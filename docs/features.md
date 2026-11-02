@@ -35,7 +35,7 @@ Source contract hashes were checked on Gold Plus and Gold SE; synthetic tests co
 
 ## Opt-in complete WAN forwarding lifecycle
 
-See [WAN lifecycle](forwarding-lifecycle.md) for the separate four-tool catalog,
+See [WAN lifecycle](forwarding-lifecycle.md) for the opt-in lifecycle catalog,
 explicit IPv4 source scope, persistent NAT plus inbound policy, exact removals and
 durable restart recovery. This is locally tested, not live-write-tested or enabled
 by default. Unknown policy semantics, inherited/indirect dependencies and ambiguous
@@ -47,3 +47,7 @@ The local opt-in [diagnostic grant workflow](diagnostic-grants.md) adds owner-co
 exact source-box/IPv4/TCP-port grants and revocation with bounded expiry/attempts.
 It preserves legacy `probe_networks`, does not alter router policies, and is not
 live-deployed or live-grant-tested. See the generated reference for all four tools.
+
+### Forwarding display names
+
+`preview_forwarding_metadata` previews a guarded rename of one or two TCP 80/443 mappings through the same lifecycle apply/recovery tools. Durable receipts preserve management identity independently of the label. Removing the optional default type field requires a separate explicit field choice; it is not implied by a rename. Native metadata replacement briefly interrupts each selected forward. This integrated workflow is locally tested and is not yet deployed. See [metadata and recovery](development/forwarding-display-names.md).
