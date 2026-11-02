@@ -135,3 +135,24 @@ These guards do not make native operations atomic against concurrent app edits.
 ## Display names and app metadata
 
 Use `preview_forwarding_metadata` for exact HTTP/HTTPS display-name changes and separately opted-in removal of the default type field. Names are independent of journal-backed ownership, including after restart. Native metadata changes require a brief remove/recreate interruption and exact confirmation; policies remain unchanged. See [metadata workflow and recovery](development/forwarding-display-names.md).
+
+### Long operations and expired maintenance windows
+
+The preview expiry is a hard dispatch deadline, not only a deadline for starting
+an operation. The server checks it before each mutation and the router helper
+also checks the confirmed maintenance window. A long reset can therefore stop
+partway through. It must not silently extend the window after confirmation.
+
+Each step checks complete stored state and relevant kernel evidence. Repeated
+verification, SSH round trips and native asynchronous policy processing can make
+large resets slow. Each native or legacy policy-verification layer reads each kernel filter table
+once per pass; a mixed pass can read it twice. Evidence is never reused across
+passes or mutations. This reduces duplicate reads but does not guarantee a
+completion time.
+
+A client or gateway timeout is not evidence that execution stopped. Do not
+resubmit apply. Use durable recovery inspection; a busy transaction must be left
+to finish or reach its deadline. After it releases the lock, inspect the verified
+partial state and obtain fresh confirmation for a continuation or conditional
+rollback. Do not clear recovery records or extend a running plan's expiry. A
+recovery preview is not permission to execute it.

@@ -25,7 +25,7 @@ def reset_fixture(metadata,monkeypatch):
   v=native_allow(spec['device'],spec['interface_uuid'],'0.0.0.0/0','tcp',port,port,token*32)
   s['policies'].append({**v,'pid':str(port),'timestamp':'1700000002','full_fingerprint':token*40,'identity_complete':True})
  monkeypatch.setattr('firewalla_mcp.forward_policy.read_projection',lambda run:copy.deepcopy(s['policies']))
- monkeypatch.setattr('firewalla_mcp.forward_app_adapter.AppForwardAdapter.legacy_proof',lambda self,row:True)
+ monkeypatch.setattr('firewalla_mcp.forward_app_adapter.AppForwardAdapter.legacy_proof',lambda self,row,rules=None:True)
  monkeypatch.setattr('firewalla_mcp.forward_app_adapter.hairpin_evidence',lambda run,value:any(r['toIP']==value['toIP'] and r['protocol']==value['protocol'] and r['toPort']==value['toPort'] for r in s['maps']))
  return fm,spec,s
 
@@ -133,3 +133,32 @@ async def test_udp_recreation_preserves_family_and_protocol(reset_fixture):
  result=await fm.apply(plan['plan_id']);assert result['outcome']=='applied',result
  assert len(s['maps'])==1 and s['maps'][0]['protocol']=='udp'
  assert len(s['policies'])==1 and s['policies'][0]['protocol']=='udp' and s['policies'][0]['target']=='203.0.113.0/24'
+
+async def test_verified_partial_reset_can_finish_in_fresh_small_plans(reset_fixture,monkeypatch):
+ """No live data: four deleted legacy policies, then 4/6/6-step plans."""
+ fm,spec,s=reset_fixture;args,p=await plan_reset(fm,spec)
+ original=fm.transaction;base=len(s['calls'])
+ def transaction(*a,**kw):
+  tx=original(*a,**kw)
+  tx.clock=lambda:p['expires_at']+1 if len(s['calls'])>=base+8 else p['expires_at']-1
+  return tx
+ monkeypatch.setattr(fm,'transaction',transaction)
+ result=await fm.apply(p['plan_id'])
+ assert result['outcome']=='partial_expired' and result['completed']==8
+ assert len(s['maps'])==6 and len(s['policies'])==2
+ fresh=ForwardManager(fm.writes,fm.adapter_factory)
+ for ports,expected in [({19132,19133},4),({80},6),({443},6)]:
+  inv=await fresh.inspect_app_objects(*args,int(time.time())+600)
+  selected=[m for m in inv['mappings'] if int(m['value']['dport']) in ports]
+  policies=[v for v in inv['policy_candidates'] if int(v['value']['localPort']) in ports]
+  maps=[{k:m[k] for k in ('key','fingerprint')} for m in selected]
+  ps=[{k:v[k] for k in ('id','birth','fingerprint')} for v in policies]
+  actions=[{'protocol':'tcp','external_port':port,'destination_port':port,'source_network':'0.0.0.0/0','display_name':'Automation '+str(port)} for port in ports if port in (80,443)]
+  plan=await fresh.preview_app_reset(*args,maps,ps,actions,False,int(time.time())+600)
+  assert len(plan['steps'])==expected
+  assert (await fresh.apply(plan['plan_id']))['outcome']=='applied'
+ assert len(s['maps'])==2 and len(s['policies'])==2
+ assert {m['dport'] for m in s['maps']}=={'80','443'}
+ # The old recovery must not undo separately confirmed subsequent work.
+ with pytest.raises(ValueError,match='changed'):
+  await fresh.recover(p['plan_id'],True,int(time.time())+600)

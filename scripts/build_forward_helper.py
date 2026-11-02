@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import zipfile
 MODULES=('forward_dispatch','forward_native','forward_policy','forward_enforcement','forward_dependencies',
-         'forward_transaction','forward_journal','forward_receipts','forward_provenance','forward_app_adapter','forward_app_adoption','forward_app_enforcement','forwarding_guidance','writes','remote')
+         'forward_transaction','forward_journal','forward_receipts','forward_provenance','forward_app_adapter','forward_app_adoption','forward_app_enforcement','ipv6_adapter','ipv6_policy','forwarding_guidance','writes','remote')
 def build(destination):
     root=Path(__file__).resolve().parents[1]/'src/firewalla_mcp'
     files={'__main__.py':b'from firewalla_mcp.forward_dispatch import main\nmain()\n','firewalla_mcp/__init__.py':b''}

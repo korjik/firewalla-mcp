@@ -74,6 +74,7 @@ class Config(BaseModel):
     forwarding_recovery_directory: str | None = None
     forwarding_lifecycle_enabled: bool = False
     forwarding_app_management_enabled: bool = False
+    ipv6_policy_enabled: bool = False
     diagnostic_grants_enabled: bool = False
     diagnostic_grants_directory: str | None = None
     diagnostic_grants_deny_addresses: list[str] = []
@@ -96,6 +97,8 @@ class Config(BaseModel):
             raise ValueError("Diagnostic grants require general host-confirmed writes and persistent storage")
         for address in self.diagnostic_grants_deny_addresses:
             if str(ip_address(address))!=address:raise ValueError("Canonical diagnostic deny address required")
+        if self.ipv6_policy_enabled and (not self.writes_enabled or not self.forwarding_recovery_directory):
+            raise ValueError("IPv6 policies require general host-confirmed writes and persistent recovery storage")
         if self.forwarding_app_management_enabled and not self.forwarding_lifecycle_enabled:
             raise ValueError("App forwarding management requires lifecycle opt-in")
         if self.forwarding_lifecycle_enabled and (not self.writes_enabled or not self.forwarding_recovery_directory):
@@ -152,3 +155,22 @@ class AppRecreateAction(LifecycleAction):
     protocol: Literal['tcp','udp']
     display_name: Annotated[str,Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$')]
     address_family: Literal['ipv4']
+
+
+class IPv6PolicyAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_network: str = Field(min_length=4,max_length=43)
+    protocol: Literal["tcp","udp"]
+    port: Port
+
+    @field_validator('source_network')
+    @classmethod
+    def canonical_ipv6_source(cls,value):
+        from ipaddress import IPv6Network
+        if '%' in value or '/' not in value:raise ValueError('Explicit unscoped IPv6 CIDR required')
+        return str(IPv6Network(value,strict=True))
+
+class IPv6PolicyRemoval(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(pattern=r'^policy:ipv6:[a-f0-9]{32}$')
+    fingerprint: str = Field(pattern=r'^[a-f0-9]{64}$')

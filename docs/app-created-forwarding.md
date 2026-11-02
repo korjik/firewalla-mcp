@@ -44,7 +44,7 @@ requires inspection; semantic equality alone cannot authorize recovery.
 | Selected IPv4 NAT removal and recreation | Supported adapter | Supported adapter | IPv4 DNAT only |
 | New scoped inbound allow accompanying NAT | Supported adapter | Supported adapter | Explicit IPv4 source CIDR; verified empty IPv6 counterpart |
 | Exact selected legacy device allow removal/restoration | Supported adapter | Supported adapter | Preserves its original dual-stack scope; requires IPv4 and IPv6 enforcement proof |
-| New IPv6 inbound pinhole/routed policy | Not exposed | Not exposed | Separate native-policy and address/enforcement contract still needs validation |
+| New device-wide IPv6 inbound policy | Separate opt-in | Separate opt-in | See [IPv6 policies](ipv6-policies.md); not a NAT reset action |
 | NAT66 or mixed-family translation | Unsupported | Unsupported | Rejected before mutation |
 
 Legacy app device allows can permit direct IPv4 **and IPv6** access, not only DNAT
@@ -81,9 +81,9 @@ A separate, technically plausible native policy omits `origDst`, uses an explici
 IPv6 source CIDR, selected WAN, device scope and TCP/UDP port, with an empty IPv4
 source counterpart. Its destination scope is the device's entire IPv6 address set,
 including addresses later added by Firewalla. It is not a single-address pinhole,
-not port translation, and not proof of routing or reachability. Supporting that
-alternative requires an explicit scope decision and a dedicated policy-only
-preview/execution/recovery adapter; it is not exposed by this candidate.
+not port translation, and not proof of routing or reachability. The separate opt-in [IPv6 policy workflow](ipv6-policies.md) implements that
+explicitly disclosed scope. It is not part of the IPv4 reset plan or enabled by
+the app-management flag.
 
 The reproducible source-contract probe is
 `scripts/check_forward_policy_contract.cjs`, run against the reviewed `control/Block.js`

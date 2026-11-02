@@ -56,9 +56,10 @@ vm.runInContext(names.map(extract).join('\n')+'\nthis.probe={prepareOutboundOpti
   assert.equal(generated.length,4);
   assert(generated.every(r=>r.origDst==='2001:db8::2' && r.proto===proto));
   assert(generated.some(r=>r.af===4));
-  delete v6.origDst;
+  delete v6.origDst;delete v6.origDport;
   const deviceWide=await sandbox.probe.generateRules(v6);
-  assert(deviceWide.every(r=>!r.origDst));
+  assert(deviceWide.every(r=>!r.origDst && !r.origDport));
+  assert(deviceWide.every(r=>r.ctDir==='ORIGINAL'?r.dst.portSet==='local443':r.src.portSet==='local443'));
   assert.equal(deviceWide.find(r=>r.af===6&&r.ctDir==='ORIGINAL').src.set6,'source_v6');
   assert.equal(deviceWide.find(r=>r.af===4&&r.ctDir==='ORIGINAL').src.set,'source_v4_empty');
  }

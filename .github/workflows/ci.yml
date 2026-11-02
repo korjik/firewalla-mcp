@@ -18,6 +18,7 @@ jobs:
       - run: python tests/container_smoke.py firewalla-mcp:test
       - run: python tests/http_container_smoke.py firewalla-mcp:test
       - run: python tests/forwarding_container_smoke.py firewalla-mcp:test
+      - run: python tests/ipv6_container_smoke.py firewalla-mcp:test
       - run: python tests/diagnostic_container_smoke.py firewalla-mcp:test
       - run: python scripts/curl_smoke.py firewalla-mcp:test
       - run: docker build -f Dockerfile.legacy -t firewalla-mcp:legacy .
@@ -27,3 +28,5 @@ jobs:
       - run: docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --entrypoint python -v "$PWD/tests:/tests:ro" firewalla-mcp:forward-contract-tests /tests/forwarding_ipv4_scope_smoke.py
       - run: docker run --rm --network none --user 1000:1000 --cap-drop ALL --entrypoint python -e PYTHONPATH=/src -v "$PWD/src:/src:ro" -v "$PWD/tests:/tests:ro" firewalla-mcp:forward-contract-tests /tests/forwarding_projection_smoke.py
       - run: docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN --entrypoint python -e PYTHONPATH=/src -v "$PWD/src:/src:ro" -v "$PWD/tests:/tests:ro" firewalla-mcp:forward-contract-tests /tests/forwarding_hairpin_smoke.py
+      - run: docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --entrypoint python -v "$PWD/tests:/tests:ro" firewalla-mcp:forward-contract-tests /tests/ipv6_policy_scope_smoke.py
+      - run: docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --entrypoint python -v "$PWD/tests:/tests:ro" firewalla-mcp:forward-contract-tests /tests/ipv6_contract_smoke.py

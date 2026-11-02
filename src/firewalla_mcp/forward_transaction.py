@@ -75,7 +75,7 @@ def bind_created_instance(before,projected,observed,step):
 
 
 def build_plan(box,binding,initial,steps,*,recovery_of=None,now=None,scope="native_forwarding_only"):
-    if scope not in ("native_forwarding_only","native_forwarding_reset"):raise ValueError("Plan scope")
+    if scope not in ("native_forwarding_only","native_forwarding_reset","native_ipv6_policy"):raise ValueError("Plan scope")
     bound=32 if scope=="native_forwarding_reset" else 16
     now=time.time() if now is None else now
     if not isinstance(steps,list) or not 1<=len(steps)<=bound:raise ValueError('Bounded steps required')
@@ -94,7 +94,7 @@ def verify_plan(plan,binding,now):
     if now>=plan['expires_at']:raise ValueError('Plan expired')
     if plan['confirmation']!='trusted_mcp_host':raise ValueError('Confirmation mode')
     state=checked_state(plan['initial'])
-    if plan['scope'] not in ('native_forwarding_only','native_forwarding_reset'):raise ValueError('Plan scope')
+    if plan['scope'] not in ('native_forwarding_only','native_forwarding_reset','native_ipv6_policy'):raise ValueError('Plan scope')
     if not 1<=len(plan['steps'])<=(32 if plan['scope']=='native_forwarding_reset' else 16):raise ValueError('Step bound')
     for step in plan['steps']:state=transition(state,step)
 

@@ -17,6 +17,7 @@ The [generated tool reference](tool-reference.md) is the complete schema catalog
 | Mixed VPN plan | Start → device switch → 1–2 forwards, expected own-state transitions | Local mocks cover drift/replay/partial outcomes; not atomic; no automatic resume/compensation or exposed mixed-plan inverse |
 | Temporary kernel route/filter/DNAT | Scoped additions and conditional removal | Mock and disposable isolated-kernel tests; not Firewalla-managed persistence; not enabled by current VPN/capture gate |
 | Device/app/DNS/scoped service writes | Tri-state overrides, new/scheduled block rules, DNS answer rules, scoped DNS/NTP | Five installed policy/control dependencies reviewed and pinned on both revisions; Ad Block/Safe Search/Unbound and rules/DNS supported in source. DoH/NTP remain blocked on these revisions. Not deployed or live-enforcement tested |
+| Device-wide IPv6 inbound policies | Separate opt-in TCP/UDP, explicit IPv6 sources, one WAN/device/port; conditional recovery | Source and synthetic/isolated tests; no live mutation claim. All device IPv6 addresses including future; no NAT66/exact-address pinhole. See [IPv6 policies](ipv6-policies.md) |
 | Permanent routes, arbitrary rule CRUD | No validated adapter | Unsupported; temporary route tools are not a substitute |
 | RADIUS, users/time quotas, arbitrary maintenance | No safe complete management contract | Unsupported; no enrollment, restart/reboot, arbitrary shell or credential-export tool |
 

@@ -14,7 +14,7 @@ def adopted(native_fixture,monkeypatch):
  s['maps']=[m];s['policies']=[p]
  a=AppForwardAdapter(old.revision,spec,[],{'mappings':[m],'policies':[p]})
  monkeypatch.setattr('firewalla_mcp.forward_policy.read_projection',lambda run:copy.deepcopy(s['policies']))
- monkeypatch.setattr(a,'legacy_proof',lambda row:True)
+ monkeypatch.setattr(a,'legacy_proof',lambda row,rules=None:True)
  monkeypatch.setattr('firewalla_mcp.forward_app_adapter.hairpin_evidence',lambda run,value:any(r['toIP']==value['toIP'] and r['protocol']==value['protocol'] and r['toPort']==value['toPort'] for r in s['maps']))
  monkeypatch.setattr(native.remote,'forward_kernel_evidence',lambda spec:{'nat_rule_observed':any(r['toIP']==spec['destination_ip'] and r['dport']==str(spec['external_port']) for r in s['maps']),'vpn_ingress_link_observed':True})
  # Reuse the isolated private journal; no router calls.
@@ -26,7 +26,7 @@ async def test_adopted_policy_delete_and_restart_restore(adopted,monkeypatch):
  plan=build_plan('router-a','binding',initial,[{'operation':'disable','key':key,'before':row,'after':disabled},{'operation':'remove','key':key,'before':disabled,'after':None}])
  assert (await tx.execute(plan,'binding'))['outcome']=='applied'
  fresh=AppForwardAdapter(a.revision,a.template,a.receipts,{'mappings':a.app_maps,'policies':a.app_policies})
- monkeypatch.setattr(fresh,'legacy_proof',lambda row:True)
+ monkeypatch.setattr(fresh,'legacy_proof',lambda row,rules=None:True)
  tx=ForwardTransaction(str(tx.journals.root.root()),fresh,lambda p:None)
  recovery=await tx.recovery_preview(plan['plan_id'],'binding',rollback=True)
  assert (await tx.execute(recovery,'binding'))['outcome']=='applied'

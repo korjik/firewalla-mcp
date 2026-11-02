@@ -5,7 +5,7 @@ from typing import Literal, Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import TypeAdapter
-from .models import Config, Name, BoxName, Port, Mac, ForwardAction, LifecycleAction, LifecycleRemoval, ForwardMetadataChange, AppMappingSelection, AppPolicySelection, AppRecreateAction
+from .models import Config, Name, BoxName, Port, Mac, ForwardAction, LifecycleAction, LifecycleRemoval, ForwardMetadataChange, AppMappingSelection, AppPolicySelection, AppRecreateAction, IPv6PolicyAction, IPv6PolicyRemoval
 from .transport import SSHTransport
 from .writes import WriteManager
 from .analysis import summarize_page
@@ -160,6 +160,52 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             actions=[{k:v for k,v in a.model_dump().items() if k!='address_family'} for a in recreate]
             return await forwarding.preview_app_reset(box_name,device,destination_ip,interface_uuid,
                 [m.model_dump() for m in mappings],[p.model_dump() for p in policies],actions,all_mappings,maintenance_until)
+
+    if config.ipv6_policy_enabled:
+        from .ipv6_manager import IPv6Manager
+        from .ipv6_transport import IPv6SSH
+        ipv6 = IPv6Manager(writes,IPv6SSH)
+
+        @mcp.tool(annotations=READ)
+        async def inspect_ipv6_policies(box_name: BoxName, device: Mac, interface_uuid: str,
+                maintenance_until: int) -> dict[str,Any]:
+            """Inspect owned device-wide IPv6 inbound policies and current device/WAN bindings.
+            No NAT, probe or mutation. Other policies remain opaque and preserved.
+            Ownership requires verified private transaction receipts, never a matching label.
+            """
+            return await ipv6.inspect(box_name,device,interface_uuid,maintenance_until)
+
+        @mcp.tool(annotations=READ)
+        async def preview_ipv6_policy_plan(box_name: BoxName, device: Mac, interface_uuid: str,
+                actions: list[IPv6PolicyAction], removals: list[IPv6PolicyRemoval],
+                maintenance_until: int) -> dict[str,Any]:
+            """Preview up to four explicit IPv6 policy creations and four exact owned removals.
+            Each allow covers all IPv6 addresses of the selected device, including future
+            addresses, on one WAN from an explicit IPv6 CIDR to one TCP/UDP port. No IPv4
+            permission, NAT66, port translation or exact single-address pinhole. Show all
+            scope/ordered steps and outage/partial-failure risks; obtain explicit human
+            confirmation through the trusted host before apply. Five-minute maximum window.
+            """
+            return await ipv6.preview(box_name,device,interface_uuid,[a.model_dump() for a in actions],
+                [r.model_dump() for r in removals],maintenance_until)
+
+        @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=False))
+        async def apply_ipv6_policy_plan(plan_id: str) -> dict[str,Any]:
+            """Apply only the exact IPv6 policy preview explicitly confirmed by the user.
+            The authenticated host enforces human confirmation; the server binds scope,
+            prior state, expiry and one-time execution. SSH remains internal. Stop on partial
+            or uncertain outcome; do not retry blindly. Rule proof is not external reachability.
+            """
+            return await ipv6.apply(plan_id)
+
+        @mcp.tool(annotations=READ)
+        async def preview_ipv6_policy_recovery(transaction_id: str, rollback: bool,
+                maintenance_until: int) -> dict[str,Any]:
+            """Preview conditional recovery of a private recorded IPv6 transaction after restart.
+            Fresh confirmation is required before apply. Preserve concurrent changes; unknown
+            allocations require inspection. Restoring a policy may allocate a new native ID.
+            """
+            return await ipv6.recover(transaction_id,rollback,maintenance_until)
 
     if config.capture_enabled:
         from .capture import CaptureManager
@@ -593,7 +639,9 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
                 "catalog_mode":"read_only" if readonly_catalog else "full",
                 "forwarding_lifecycle_enabled":config.forwarding_lifecycle_enabled,
                 "forwarding_app_management_enabled":config.forwarding_app_management_enabled,
-                "forwarding_families":{"new_dnat":["ipv4"],"new_transports":["tcp","udp"],"new_ipv6_pinhole":False,"nat66":False,"legacy_restore":"Selected exact dual-stack device allows; requires both-family proof"},
+                "ipv6_policy_enabled":config.ipv6_policy_enabled,
+                "ipv6_policy_scope":"Opt-in device-wide IPv6 inbound policies, including future device addresses; no NAT66 or exact address pinholes",
+                "forwarding_families":{"new_dnat":["ipv4"],"new_transports":["tcp","udp"],"new_ipv6_pinhole":config.ipv6_policy_enabled,"nat66":False,"legacy_restore":"Selected exact dual-stack device allows; requires both-family proof"},
                 "diagnostic_grants_enabled":config.diagnostic_grants_enabled,
                 "confirmation_mode":config.write_confirmation_mode,
                 "approval_workflow":writes.approval_next_step() if config.writes_enabled else None,
@@ -603,7 +651,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
                 "implemented_in_source_not_deployment_validation": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions", "persistent IPv4 WAN-interface or VPN NAT single mapping or 2–4 ordered same-target mappings; current source pins, mock-tested only", "revision-pinned device/group/network tri-state controls, scheduled app/category blocks, DNS answer rules, device VPN switches and profile lifecycle"],
                 "approval": "Source write adapters require separate opt-in, version/scope checks and one-time approval; their presence does not establish live compatibility or availability",
                 "deployment_validation":"Read-only tools tested; no live write enforcement or rollback validation claimed",
-                "unsupported": ["persistent Firewalla routes; IPv6/DMZ forwarding, all-WAN wildcard creation and arbitrary LAN ingress; arbitrary mixed/cross-plugin plans", "global policies, arbitrary existing rule updates, user time quotas", "profile import without its dedicated opt-in and registered input", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
+                "unsupported": ["persistent Firewalla routes; NAT66/exact-address IPv6 pinholes/DMZ forwarding, all-WAN wildcard creation and arbitrary LAN ingress; arbitrary mixed/cross-plugin plans", "global policies, arbitrary existing rule updates, user time quotas", "profile import without its dedicated opt-in and registered input", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
 
     @mcp.tool(annotations=READ)
     async def preview_scheduled_block_rule(box_name: BoxName,device: Mac,

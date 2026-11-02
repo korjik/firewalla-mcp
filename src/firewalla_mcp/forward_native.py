@@ -88,6 +88,12 @@ class NativeForwardAdapter:
 
     async def verify(self,state,removed=()):
         if await self.snapshot()!=state:return False
+        filter_rules=None
+        def rules_once():
+            nonlocal filter_rules
+            if filter_rules is None:
+                filter_rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+            return filter_rules
         for key,row in state['objects'].items():
             if key.startswith('mapping:mcp:'):
                 try:spec=self.mapping_spec(row['value'])
@@ -99,8 +105,7 @@ class NativeForwardAdapter:
                 if row['enabled']:
                     for name in ('c_bd_'+pid+'_set','c_bd_'+pid+'_set6','c_bp_'+pid+'_local_port'):
                         sets[name]=remote.run(['sudo','-n','ipset','save',name])
-                rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
-                if not verify_policy(value,pid,*rules,sets,row['enabled']):return False
+                if not verify_policy(value,pid,*rules_once(),sets,row['enabled']):return False
         if not isinstance(removed,(list,tuple)) or len(removed)>64:raise ValueError('Removed proof bound')
         for item in removed:
             if set(item)!={'key','before'}:raise ValueError('Removed proof identity')
@@ -122,8 +127,7 @@ class NativeForwardAdapter:
             else:
                 value=self.policy_value(row['value']);pid=row['instance']['id']
                 if any(r.get('instance',{}).get('id')==pid for r in state['objects'].values()):return False
-                rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
-                if not verify_policy(value,pid,*rules,{},False):return False
+                if not verify_policy(value,pid,*rules_once(),{},False):return False
         return True
 
     async def mutate(self,step,expected,expires_at):

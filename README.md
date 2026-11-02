@@ -27,7 +27,7 @@ This unofficial community project connects directly to your Firewalla appliances
 | Traffic and alarms | Bounded per-device flow queries, page summaries, active alarm samples/counts and interface counters |
 | Connection diagnosis | DNS lookups, allowlisted TCP tests and port-forward diagnosis that distinguishes configured mappings from external reachability |
 | Optional capture | Preview, start, status and cancel; explicit scope; at most **15 seconds / 100 packets**, metadata only |
-| Optional writes | VPN lifecycle, device VPN switching and registered inactive profile imports; source-supported rules, controls, DNS answers, persistent WAN/interface and VPN forwarding, and compound plans |
+| Optional writes | VPN lifecycle, device VPN switching and registered inactive profile imports; source-supported rules, controls, DNS answers, persistent WAN/interface and VPN forwarding, separate [device-wide IPv6 policies](docs/ipv6-policies.md), and compound plans |
 
 **Availability depends on configuration and firmware.** Default startup exposes inspection tools, not executable writes. DNS/TCP diagnostics still generate network traffic; read-only does not mean passive. Some write adapters are source-supported candidates rather than deployed or live-enforcement-tested features. The [support matrix](docs/features.md) records that distinction; the [complete tool reference](docs/tool-reference.md) lists every tool, argument and limit.
 

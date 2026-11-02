@@ -75,25 +75,32 @@ class AppForwardAdapter(ReceiptNativeAdapter):
                   'instance':{'id':p['pid'],'birth':str(p['timestamp'])}}
         return state
 
-    def legacy_proof(self,row):
+    def legacy_proof(self,row,rules=None):
         pid=row['instance']['id'];sets={}
         if row['enabled']:
             name='c_bp_'+pid+'_local_port';sets[name]=remote.run(['sudo','-n','ipset','save',name])
-        rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+        if rules is None:rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
         return verify_legacy_allow(row['value'],pid,*rules,sets,row['enabled'])
 
     async def verify(self,state,removed=()):
         legacy=[r for r in removed if r['key'] in self.app_values]
         if not await super().verify(state,[r for r in removed if r not in legacy]):return False
+        # One fresh pair per verification pass, never retained across mutations.
+        rules=None
+        def proof(row):
+            nonlocal rules
+            if rules is None:
+                rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+            return self.legacy_proof(row,rules)
         for key,row in state['objects'].items():
-            if key in self.app_values and not self.legacy_proof(row):return False
+            if key in self.app_values and not proof(row):return False
             if row['kind']=='mapping' and row['value'] in self.app_maps:
                 evidence=remote.forward_kernel_evidence(self.mapping_spec(row['value']))
                 if not evidence['nat_rule_observed'] or not evidence['vpn_ingress_link_observed'] or not hairpin_evidence(remote.run,row['value']):return False
         for item in legacy:
             pid=item['before']['instance']['id']
             if any(r.get('instance',{}).get('id')==pid for r in state['objects'].values()):return False
-            if not self.legacy_proof({**item['before'],'enabled':False}):return False
+            if not proof({**item['before'],'enabled':False}):return False
         return True
 
     async def mutate(self,step,expected,expires_at):
