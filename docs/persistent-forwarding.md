@@ -104,7 +104,7 @@ Material changes or new steps require new confirmation. No live mixed plan teste
 | Family | Host-confirmed flow | Installed-firmware status |
 |---|---|---|
 | VPN lifecycle/device switch/import | Existing supported catalog | Reviewed contracts; live mutations not tested here |
-| Persistent VPN NAT mapping / start-switch-forward plan | New local single/bounded compound adapters | Exact installed source pins; realistic mocks only; deployment pending |
+| Persistent WAN/interface and VPN NAT / VPN start-switch-forward plan | Source-supported single/bounded compound adapters | Exact installed source pins; realistic mocks only; deployment pending |
 | Kernel route/filter/DNAT | Shared general confirmation supported | Temporary kernel state only; restricted tables/chains; not app-persistent |
 | Device Safe Search/Ad Block/Unbound/DoH | Shared general confirmation supported | Current source pins for Ad Block/Safe Search/Unbound; DoH remains rejected |
 | Persistent app/category/scheduled rules and DNS overrides | Shared general confirmation supported | Current policy dependencies reviewed and pinned; mocks only, no live enforcement test |

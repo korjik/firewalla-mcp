@@ -152,6 +152,7 @@ HTTP serves MCP at `/mcp` and requires a protected bearer-token file plus allowe
 - “Which devices are explicitly assigned to Alex? Keep possible device-name matches separate.”
 - “List saved VPN profiles on router-b with their names, types and configured server endpoints. Distinguish observed connectivity from unknown health.”
 - “Summarize this device's recent flows in a bounded time window. Show top destinations and explain any missing history.”
+- “Preview a persistent TCP forward on the selected WAN to this device, then wait for my confirmation.”
 - “Diagnose why this forwarded TCP port is unreachable. Separate the listening service, VPN path, mapping and independent external test.”
 - With writes enabled: “Preview switching this device from profile_a to profile_b, preserving strict VPN and DNS settings. Wait for my confirmation.”
 - With capture enabled: “Preview a ten-second capture for this device and TCP port on the selected VPN interface. Show the scope before starting.”
