@@ -190,8 +190,14 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
 
     @mcp.tool(annotations=READ)
     async def port_forward_mappings(box_name: BoxName) -> dict[str, Any]:
-        """Read sanitized configured forwarding intent; not effective kernel mappings."""
-        return await read(box_name, "mappings")
+        """List saved NAT mappings, not firewall allow rules or proof a service is reachable.
+        Check kernel translation, applicable inbound policy, listener/return path and
+        an independent external connection separately. Never add a duplicate mapping
+        just because an external probe fails. No changes performed.
+        """
+        from .forwarding_guidance import guidance
+        result=await read(box_name, "mappings")
+        return {**result,"forwarding_guidance":guidance(phase="inventory")}
 
     @mcp.tool(annotations=READ)
     async def firewall_counters(box_name: BoxName, table: Literal["filter", "nat", "mangle"] = "filter") -> dict[str, Any]:
@@ -584,6 +590,8 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         Scope is the WAN destination-address set including hairpin, not physical
         ingress-only filtering. Requires observed LAN device/IP binding, no conflict,
         and a maintenance window with no concurrent mapping edits (up to ten minutes).
+        Creates NAT only. Separate inbound firewall permission may be needed; inspect
+        applicable policies before proposing an exact separately confirmed allow.
         Does not add firewall allows, change routing or prove external reachability.
         Show exact preview, obtain host confirmation, then call apply_change.
         """
@@ -619,6 +627,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         stop on an unverified step; no blind rollback or resume. Earlier verified
         mapping additions are accounted for without accepting unrelated state drift.
         VPN start/switch and external-app steps are not part of this bounded plan.
+        NAT only: inbound policy permission and external reachability are separate checks.
         Confirm the entire plan then apply_change; SSH stays internal.
         """
         import time,secrets
@@ -664,6 +673,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
                                     action: Literal["ACCEPT", "DROP", "REJECT"]) -> dict[str, Any]:
         """Preview one temporary IPv4 filter rule appended to an allowed existing chain.
         This is kernel state, not a Firewalla app rule. May affect connectivity.
+        An ACCEPT filter does not create a NAT/port-forward mapping or prove external reachability.
         """
         return await writes.preview(box_name,{"kind":"filter_rule","chain":chain,"source":source,
             "destination":destination,"protocol":protocol,"destination_port":destination_port,"action":action})
@@ -686,6 +696,9 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         MCP host, then call this tool directly. SSH remains internal; no issuer file.
         Approval is single-use, expires after 10 minutes, and must match the preview digest.
         Stale/uncertain states are never automatically retried. May disrupt networking.
+        For forwarding, applied means NAT operation completion only. Report the
+        structured verification levels; firewall permission and independent external
+        reachability remain separate. Never silently add companion allow policies.
         """
         return await writes.apply(plan_id)
 

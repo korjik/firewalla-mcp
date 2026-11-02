@@ -1,4 +1,5 @@
 """Host-approved, temporary kernel changes. No MCP tool can issue an approval."""
+from .forwarding_guidance import KINDS as FORWARD_KINDS, guidance as forwarding_guidance
 import asyncio
 import copy
 import hashlib
@@ -140,6 +141,8 @@ class WriteManager:
               "mode":mode,"expires_at":now+600,"scope":"vpn_runtime_lifecycle" if spec["kind"]=="managed_lifecycle" else "persistent_managed" if spec["kind"].startswith("managed_") else "temporary_kernel_only"}
         if context is not None:
             plan["context"]=context
+        if spec["kind"] in FORWARD_KINDS:
+            plan["forwarding_guidance"]=forwarding_guidance(spec)
         plan["site_binding"]=self.site_binding(box)
         plan["target_authorization"]="trusted_mcp_host_confirmation"
         plan["digest"]=digest(plan)
@@ -174,7 +177,7 @@ class WriteManager:
                 return {"status":"conflict","reason":"Potential forwarding overlap; no plan created and no mapping changed.","evidence":copy.deepcopy(state.get("conflict_details",{}))}
             if state["present"]:
                 if spec["kind"].startswith("managed_") and "forward" in spec["kind"]:
-                    return {"status":"no_change","reason":"Exact enabled configured mapping already exists; enforcement and external reachability are not proven."}
+                    return {"status":"no_change","reason":"Exact enabled configured mapping already exists; enforcement and external reachability are not proven.","forwarding_guidance":forwarding_guidance(spec,phase="existing")}
                 return {"status":"no_change","reason":"Desired state or potentially duplicate rule already exists; no replacement is permitted."}
             return self.new_plan(box,spec,state,"apply")
 
@@ -203,6 +206,8 @@ class WriteManager:
             self.audit(plan_id,"host_requested_attempt",plan["box"])
             plan["status"]="uncertain" # Cancellation/transport failure never permits automatic retry.
             result=await self.remote_write(site,plan["spec"],plan["mode"],plan["expected"],plan.get("context"),plan["expires_at"])
+            if plan["spec"]["kind"] in FORWARD_KINDS:
+                result={**result,"forwarding_guidance":forwarding_guidance(plan["spec"],result,phase="apply")}
             plan["result"]=result
             outcome=result.get("data",{}).get("outcome","uncertain")
             plan["status"]=outcome

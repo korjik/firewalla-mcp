@@ -156,7 +156,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+capture`.
 
-Apply or roll back an exact preview after its configured confirmation workflow. In host_confirmed mode obtain exact user confirmation in the authenticated MCP host, then call this tool directly. SSH remains internal; no issuer file. Approval is single-use, expires after 10 minutes, and must match the preview digest. Stale/uncertain states are never automatically retried. May disrupt networking.
+Apply or roll back an exact preview after its configured confirmation workflow. In host_confirmed mode obtain exact user confirmation in the authenticated MCP host, then call this tool directly. SSH remains internal; no issuer file. Approval is single-use, expires after 10 minutes, and must match the preview digest. Stale/uncertain states are never automatically retried. May disrupt networking. For forwarding, applied means NAT operation completion only. Report the structured verification levels; firewall permission and independent external reachability remain separate. Never silently add companion allow policies.
 
 Annotations: `{"destructiveHint": true, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": false}`
 
@@ -1120,7 +1120,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `read`, `vpn`, `vpn+capture`, `combined+capture`.
 
-Read sanitized configured forwarding intent; not effective kernel mappings.
+List saved NAT mappings, not firewall allow rules or proof a service is reachable. Check kernel translation, applicable inbound policy, listener/return path and an independent external connection separately. Never add a duplicate mapping just because an external probe fails. No changes performed.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -1275,7 +1275,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+capture`.
 
-Preview one temporary IPv4 filter rule appended to an allowed existing chain. This is kernel state, not a Firewalla app rule. May affect connectivity.
+Preview one temporary IPv4 filter rule appended to an allowed existing chain. This is kernel state, not a Firewalla app rule. May affect connectivity. An ACCEPT filter does not create a NAT/port-forward mapping or prove external reachability.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -1342,7 +1342,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+capture`.
 
-Preview 2–4 ordered persistent mappings for one device/VPN, one confirmation. Each exact protocol/port action is bound in one immutable plan. Not atomic: stop on an unverified step; no blind rollback or resume. Earlier verified mapping additions are accounted for without accepting unrelated state drift. VPN start/switch and external-app steps are not part of this bounded plan. Confirm the entire plan then apply_change; SSH stays internal.
+Preview 2–4 ordered persistent mappings for one device/VPN, one confirmation. Each exact protocol/port action is bound in one immutable plan. Not atomic: stop on an unverified step; no blind rollback or resume. Earlier verified mapping additions are accounted for without accepting unrelated state drift. VPN start/switch and external-app steps are not part of this bounded plan. NAT only: inbound policy permission and external reachability are separate checks. Confirm the entire plan then apply_change; SSH stays internal.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -1766,7 +1766,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+capture`.
 
-Preview a persistent IPv4 mapping for one current WAN network UUID. Uses FireMain stored configuration, never temporary iptables-only changes. Scope is the WAN destination-address set including hairpin, not physical ingress-only filtering. Requires observed LAN device/IP binding, no conflict, and a maintenance window with no concurrent mapping edits (up to ten minutes). Does not add firewall allows, change routing or prove external reachability. Show exact preview, obtain host confirmation, then call apply_change.
+Preview a persistent IPv4 mapping for one current WAN network UUID. Uses FireMain stored configuration, never temporary iptables-only changes. Scope is the WAN destination-address set including hairpin, not physical ingress-only filtering. Requires observed LAN device/IP binding, no conflict, and a maintenance window with no concurrent mapping edits (up to ten minutes). Creates NAT only. Separate inbound firewall permission may be needed; inspect applicable policies before proposing an exact separately confirmed allow. Does not add firewall allows, change routing or prove external reachability. Show exact preview, obtain host confirmation, then call apply_change.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 

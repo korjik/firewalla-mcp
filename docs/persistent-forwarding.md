@@ -158,3 +158,25 @@ from a possible overlap (`conflict`, with bounded source/count evidence). Neithe
 result proves effective enforcement or external reachability. Kernel overlap
 checks inspect actual DNAT jump targets and protocol/port selectors; conntrack
 state labels and unrelated DNS redirects are not forwarding duplicates.
+
+### Completion means several independent checks
+
+A firewall allow policy permits matching traffic; it does not translate an inbound
+port to a LAN destination. A NAT mapping performs translation; it does not prove
+that policy permits the packet, the service listens, replies use the correct path,
+or an external client can connect. Do not recreate a mapping because a probe fails.
+
+Forwarding previews, apply results and mapping inventory include
+`forwarding_guidance` with distinct verification levels. `service_ready: unknown`
+is intentional even after `applied` or `no_change`. A batch needs per-step inspection.
+Use the observed evidence to say “mapping saved and NAT observed” rather than
+“port opened.” Inspect applicable policy and precedence, the listener/host firewall,
+and reply routing; then use an authorized independent probe with a new connection.
+An external timeout alone cannot establish which layer failed.
+
+If a separate inbound allow is needed, preview its exact target, direction,
+protocol, ports and source scope and obtain confirmation. A forwarding plan does
+not include that policy or authorize broader permissions. When a suitable policy
+writer is unavailable, report that limitation instead of silently using another
+write path. Inventory pages and direct device rules do not prove the absence of
+inherited group/network/global policy.
