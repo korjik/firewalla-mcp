@@ -71,6 +71,8 @@ class Config(BaseModel):
     vpn_target_policy: Literal["allowlist", "approval_bound"] = "allowlist"
     approval_consumed_directory: str | None = None
     audit_file: str | None = None
+    forwarding_recovery_directory: str | None = None
+    forwarding_lifecycle_enabled: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -86,6 +88,8 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def explicit_host_mode(self):
+        if self.forwarding_lifecycle_enabled and (not self.writes_enabled or not self.forwarding_recovery_directory):
+            raise ValueError("Forwarding lifecycle requires general host-confirmed writes and persistent recovery storage")
         if (self.writes_enabled and self.write_confirmation_mode != "host_confirmed") or (self.vpn_writes_enabled and self.vpn_confirmation_mode != "host_confirmed"):
             raise ValueError("Writes require explicit host_confirmed migration; no automatic trust-model switch")
         return self
@@ -96,3 +100,21 @@ class Config(BaseModel):
         if not any(ip_address(address) in ip_network(n) for n in self.sites[site].probe_networks):
             raise ValueError("target is outside configured probe networks")
         return address
+
+class LifecycleAction(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    protocol: Literal['tcp']
+    external_port: Port
+    destination_port: Port
+    source_network: str
+
+    @field_validator('source_network')
+    @classmethod
+    def explicit_ipv4_source(cls,value):
+        from ipaddress import IPv4Network
+        return str(IPv4Network(value,strict=True))
+
+class LifecycleRemoval(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    key: Annotated[str,Field(pattern=r'^(mapping|policy):mcp:[a-f0-9]{32}$')]
+    fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{64}$')]

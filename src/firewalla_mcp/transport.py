@@ -27,14 +27,14 @@ def ssh_argv(site: Site, command: str) -> list[str]:
             "--", site.user+"@"+site.host, command]
 
 
-async def bounded_read(stream):
+async def bounded_read(stream, limit=MAX_OUTPUT):
     chunks, size = [], 0
     while True:
         part = await stream.read(8192)
         if not part:
             return b"".join(chunks)
         size += len(part)
-        if size > MAX_OUTPUT:
+        if size > limit:
             raise ValueError("output limit")
         chunks.append(part)
 

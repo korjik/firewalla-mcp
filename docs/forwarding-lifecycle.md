@@ -1,0 +1,112 @@
+# Complete WAN forwarding lifecycle
+
+This opt-in workflow combines persistent IPv4 TCP NAT mappings and scoped inbound
+allow policies under one host-confirmed plan. It is not enabled by the normal
+read-only or VPN-only catalog. Local contract, mocked lifecycle/recovery and
+isolated packet tests are available; this implementation has not been deployed
+or live-write-tested on an appliance.
+
+## Scope shown before confirmation
+
+Each action names a device, destination IPv4 address, current WAN UUID, TCP external
+and internal ports, and an explicit IPv4 source CIDR. A source of `0.0.0.0/0` means
+all IPv4 sources; there is no implicit source default. Up to four actions and eight
+exact removal selections are accepted, with at most sixteen ordered native steps.
+
+The native allow uses device/source/port/WAN scope. It **does not require DNAT** or
+one exact original public destination IP. Matching routed IPv4 traffic or traffic
+through another mapping can qualify. The device allowance follows its native
+address set; the NAT destination is pinned to the selected address. UDP, other
+ports and IPv6 sources are excluded by this workflow. A positive IPv4 source set
+and an empty IPv6 counterpart are verified alongside the native rule shape.
+Existing policy precedence can still block traffic. Neither configuration nor
+kernel evidence proves service availability or external reachability.
+
+## Workflow
+
+1. `inspect_forwarding_lifecycle` reads bounded object identities and fingerprints.
+   These are private metadata, not deletion authority or ownership proof.
+2. `preview_forwarding_lifecycle` preserves equivalent configured objects, creates
+   new allows disabled, creates NAT, then enables the allows. Exact removals are
+   separately listed and checked for dependencies. A label alone never authorizes
+   deletion. Unknown inheritance/references or policy fields block removal.
+3. Show the entire preview, exposure, ordered steps and maintenance deadline to the
+   user. Obtain explicit confirmation, with no concurrent app/API policy or mapping
+   edits during the window.
+4. `apply_forwarding_lifecycle` executes that immutable, single-use plan using SSH
+   internally. It checks state and deadline before each step and stops on uncertainty.
+5. After interruption or restart, `preview_forwarding_recovery` inspects the durable
+   journal and current state. Set `rollback` to `true` to reverse verified changes,
+   or `false` to continue remaining steps. Either result is a **new plan requiring
+   fresh confirmation**. Never clear the journal or execution ledger to retry.
+
+Creation/deletion is not atomic. Recovery checks configured state, native rule evidence and removal remnants.
+A lost response followed by unchanged stored state is **not** sufficient to retry:
+the native queue might still execute later. That case blocks recovery until the
+queue/outcome is independently resolved; it never becomes an automatic retry. Policy IDs and creation timestamps are retained so replacement
+objects are not mistaken for the originals. Restoring a deleted policy allocates
+and binds a new native ID. Partial failure never triggers blind compensation.
+
+## Example action
+
+Use current IDs and fingerprints from inspection, never copied example identities:
+
+```json
+{
+  "protocol": "tcp",
+  "external_port": 443,
+  "destination_port": 443,
+  "source_network": "203.0.113.0/24"
+}
+```
+
+An exact removal selection contains `key` and `fingerprint`. Leave `removals` empty
+to preserve existing objects and add only missing configuration. A matching
+unowned or disabled policy is a conflict, not permission to reactivate it.
+
+## Installation and permission boundary
+
+Use the general catalog (`--allow-write-catalog`), existing explicit
+`write_confirmation_mode: "host_confirmed"`, persistent audit and consumption
+storage, and:
+
+```json
+{
+  "forwarding_lifecycle_enabled": true,
+  "forwarding_recovery_directory": "/state/forwarding"
+}
+```
+
+Provision `/state/forwarding` as a persistent, process-owned `0700` directory.
+Journals are `0600`, contain private target metadata, and are not approvals. Back
+up the journal and execution ledger together. An interrupted final journal record
+fails closed; do not truncate it to force recovery.
+
+The workflow requires a separately reviewed router helper built with:
+
+```sh
+python scripts/build_forward_helper.py /tmp/firewalla-mcp-forward.pyz
+```
+
+Review the artifact and its printed digest before installation. The candidate
+network gate adds only the fixed command `firewalla-forward-lifecycle-v1`, executing
+that pinned helper from the existing private SSH directory. It does not allow
+arbitrary shell commands, helper paths or general device/DNS writes. Router gate
+installation and the new capability flag are security changes requiring explicit
+operator approval. Preserve existing key entries, fingerprints, credentials and
+gateway identities. No additional user-facing SSH plugin or approval issuer exists.
+
+The helper combines the reviewed policy, forwarding and `control/Block.js` source
+guards. Unsupported revisions, unknown object fields, indirect rule-group
+references, ambiguous matches and incomplete dependency evidence fail closed.
+A trusted authenticated MCP host enforces human confirmation; the server does not
+independently attest a human reply.
+
+## Validation
+
+The isolated family test runs only in a disposable container with no host/LAN
+network. It verifies actual IPv4 packet acceptance and IPv6 packet rejection by
+the source-set constraint. It does not test Firewalla's complete packet path.
+The mock native tests cover create, exact legacy mapping selection, preservation,
+delete, restart, partial execution, native ID replacement and conditional recovery.
+No successful mock or isolated test is a claim of live appliance enforcement.

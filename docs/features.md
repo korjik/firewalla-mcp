@@ -31,3 +31,12 @@ File-based/operator execution and the external issuer have been removed. Existin
 `forwarding_interfaces` projects current network UUIDs, names, types and IPv4 subnets. `preview_persistent_forward` and `preview_interface_forward_plan` add persistent WAN mappings for an existing device MAC and expected LAN IPv4, using the same confirmed `apply_change` as VPN mappings. Single additions have conditional exact-state rollback; batches stop on partial/uncertain outcomes and do not automatically compensate.
 
 Source contract hashes were checked on Gold Plus and Gold SE; synthetic tests cover native request shape, conflicts, routing/interface drift and rollback. No live mapping, reboot, external reachability or persistence test is claimed. WAN scope matches destination addresses, including hairpin traffic, not an ingress-only ACL. See [forwarding](persistent-forwarding.md) for setup and limits.
+
+
+## Opt-in complete WAN forwarding lifecycle
+
+See [WAN lifecycle](forwarding-lifecycle.md) for the separate four-tool catalog,
+explicit IPv4 source scope, persistent NAT plus inbound policy, exact removals and
+durable restart recovery. This is locally tested, not live-write-tested or enabled
+by default. Unknown policy semantics, inherited/indirect dependencies and ambiguous
+objects fail closed. It does not expand other managed or kernel write permissions.

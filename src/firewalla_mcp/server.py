@@ -5,7 +5,7 @@ from typing import Literal, Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import TypeAdapter
-from .models import Config, Name, BoxName, Port, Mac, ForwardAction
+from .models import Config, Name, BoxName, Port, Mac, ForwardAction, LifecycleAction, LifecycleRemoval
 from .transport import SSHTransport
 from .writes import WriteManager
 from .analysis import summarize_page
@@ -36,6 +36,57 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
     if not vpn_write_catalog and config.writes_enabled and config.vpn_writes_enabled:
         from .vpn_import_mcp import ImportManager
         imports = ImportManager(config, import_transport)
+
+    if config.forwarding_lifecycle_enabled:
+        if readonly_catalog or vpn_write_catalog:raise ValueError("Forwarding lifecycle requires the general catalog")
+        from .forward_manager import ForwardManager
+        forwarding=ForwardManager(writes)
+
+        @mcp.tool(annotations=READ)
+        async def inspect_forwarding_lifecycle(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, maintenance_until: int) -> dict[str, Any]:
+            """Read exact mapping/policy identities and fingerprints for a scoped WAN lifecycle.
+            No rules change. This metadata is private. Missing/inherited policy evidence
+            is not proof of absence. Use exact selections in a fresh preview; never
+            delete objects merely because they have an MCP label or a lost plan ID.
+            """
+            return await forwarding.inspect(box_name,device,destination_ip,interface_uuid,maintenance_until)
+
+        @mcp.tool(annotations=READ)
+        async def preview_forwarding_lifecycle(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, actions: list[LifecycleAction], removals: list[LifecycleRemoval],
+                maintenance_until: int) -> dict[str, Any]:
+            """Preview up to four TCP WAN forwards and scoped IPv4 inbound allows as one plan.
+            Each action requires protocol=tcp, external_port, destination_port and
+            source_network (explicit IPv4 CIDR). Removals require exact inventory key
+            and fingerprint. Preserve equivalent NAT where possible; unrelated objects
+            remain untouched. Allows cover matching routed/other-mapping IPv4 traffic
+            through the selected WAN/device/ports; no exact original-IP or DNAT-only
+            constraint. IPv6 sources are excluded and verified. Native changes are not
+            atomic. Show all ordered steps, exposure and partial-failure risks and obtain
+            explicit confirmation before apply_forwarding_lifecycle. SSH is internal.
+            """
+            return await forwarding.preview(box_name,device,destination_ip,interface_uuid,[a.model_dump() for a in actions],[r.model_dump() for r in removals],maintenance_until)
+
+        @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=True))
+        async def apply_forwarding_lifecycle(plan_id: str) -> dict[str, Any]:
+            """Execute only the exact lifecycle preview after explicit user confirmation.
+            The trusted host enforces confirmation; the server binds state, target,
+            expiry and single use. Stop on drift/uncertainty, with durable per-step
+            recovery. Never claim external reachability from stored or kernel state.
+            """
+            return await forwarding.apply(plan_id)
+
+        @mcp.tool(annotations=READ)
+        async def preview_forwarding_recovery(transaction_id: str, rollback: bool,
+                maintenance_until: int) -> dict[str, Any]:
+            """Inspect durable lifecycle progress after restart and preview continuation or rollback.
+            Requires exact current objects, native identity and enforcement proof.
+            Never automatically retry uncertain writes or reuse prior consent. Show
+            this new plan and obtain fresh confirmation before applying. Changed or
+            ambiguous state blocks recovery; do not clear journals or execution ledger.
+            """
+            return await forwarding.recover(transaction_id,rollback,maintenance_until)
 
     if config.capture_enabled:
         from .capture import CaptureManager
@@ -464,6 +515,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
                 "management_revisions_supported":list(__import__("firewalla_mcp.remote",fromlist=["VPN_MANAGEMENT_REVISIONS"]).VPN_MANAGEMENT_REVISIONS)}
         return {"configured_contracts":contracts,"enabled": config.writes_enabled and not readonly_catalog,
                 "catalog_mode":"read_only" if readonly_catalog else "full",
+                "forwarding_lifecycle_enabled":config.forwarding_lifecycle_enabled,
                 "confirmation_mode":config.write_confirmation_mode,
                 "approval_workflow":writes.approval_next_step() if config.writes_enabled else None,
                 "executable_write_tools_exposed":not readonly_catalog,

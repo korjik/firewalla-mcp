@@ -21,6 +21,8 @@ class WriteManager:
         self.config=config
         self.transport=transport
         self.plans={}
+        from .forward_receipts import ForwardReceipts
+        self.forward_receipts=ForwardReceipts(config.forwarding_recovery_directory)
         self.locks={name:asyncio.Lock() for name in config.sites}
 
     def approval_bound_targets(self):
@@ -202,6 +204,8 @@ class WriteManager:
                 raise ValueError("Plan expired; preview again")
             self.check_plan(plan)
             site=self.validate(plan["box"],plan["spec"]).model_copy(deep=True)
+            durable=plan["spec"]["kind"] in ("managed_forward","managed_interface_forward") and self.config.forwarding_recovery_directory is not None
+            if durable:self.forward_receipts.save(plan,"started")
             self.consume_approval(plan)
             self.audit(plan_id,"host_requested_attempt",plan["box"])
             plan["status"]="uncertain" # Cancellation/transport failure never permits automatic retry.
@@ -216,18 +220,31 @@ class WriteManager:
             except OSError:
                 result={**result,"audit_warning":"After-state audit failed; do not retry mutation"}
                 plan["result"]=result
+            if durable:
+                try:self.forward_receipts.save(plan,"completed")
+                except (OSError,ValueError):
+                    result={**result,"recovery_warning":"Completion receipt not persisted; inspect started receipt and current state, never retry automatically"}
             return result
 
     async def rollback_preview(self,plan_id):
         self.enabled()
-        if plan_id not in self.plans:
-            raise ValueError("Unknown plan")
+        recovered=False
+        memory=self.plans.get(plan_id)
+        expired_forward=memory is not None and memory["expires_at"]<=time.time() and memory["spec"]["kind"] in ("managed_forward","managed_interface_forward") and memory["status"]=="applied" and self.config.forwarding_recovery_directory is not None
+        if memory is None or expired_forward:
+            if not self.config.forwarding_recovery_directory:raise ValueError("Unknown plan; no durable forwarding recovery configured")
+            receipt=self.forward_receipts.load(plan_id)
+            if receipt["phase"]!="completed":raise ValueError("Uncertain interrupted operation; inspect current state, no automatic recovery")
+            saved=receipt["plan"]
+            if saved["spec"]["kind"] not in ("managed_forward","managed_interface_forward"):raise ValueError("Unsupported durable recovery kind")
+            self.check_plan(saved)
+            self.plans[plan_id]=saved;recovered=True
         plan=self.plans[plan_id]
         if plan["spec"]["kind"] in ("managed_lifecycle","managed_forward_batch"):
             raise ValueError("Lifecycle changes have no exact rollback; preview a separate compensating operation after inspection")
         if plan["status"]!="applied" or plan["mode"]!="apply":
             raise ValueError("No verified applied change to roll back")
-        if plan["expires_at"]<=time.time():
+        if plan["expires_at"]<=time.time() and not recovered:
             raise ValueError("Rollback window expired; inspect manually")
         self.check_plan(plan)
         site=self.validate(plan["box"],plan["spec"]).model_copy(deep=True)
@@ -236,4 +253,6 @@ class WriteManager:
             expected=plan["result"]["data"]["state"]["fingerprint"]
             if current.get("status")!="ok" or current["data"]["fingerprint"]!=expected:
                 return {"status":"stale","reason":"State changed since application. No automatic rollback."}
-            return self.new_plan(plan["box"],plan["spec"],current["data"],"rollback",plan["result"]["data"].get("context"))
+            recovery_spec=copy.deepcopy(plan["spec"])
+            if recovered:recovery_spec["maintenance_until"]=int(time.time())+300
+            return self.new_plan(plan["box"],recovery_spec,current["data"],"rollback",plan["result"]["data"].get("context"))

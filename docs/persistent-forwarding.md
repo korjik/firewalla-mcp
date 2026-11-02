@@ -180,3 +180,86 @@ not include that policy or authorize broader permissions. When a suitable policy
 writer is unavailable, report that limitation instead of silently using another
 write path. Inventory pages and direct device rules do not prove the absence of
 inherited group/network/global policy.
+
+### Durable recovery for new single-mapping operations
+
+An optional `forwarding_recovery_directory` stores private operation receipts for
+new single WAN/VPN mapping operations. Provision a persistent, process-owned `0700`
+directory; receipts are `0600` and contain private target metadata, expected state
+and ownership context, but no SSH keys or VPN credentials. Back it up securely
+alongside the execution ledger. Do not clear either store to retry an operation.
+
+The server writes a started receipt before dispatch. After a response it
+records the terminal result, including uncertain outcomes. A completed receipt is
+not proof of success: only a verified `applied` result qualifies for rollback. Following a restart, `preview_rollback` can use a completed
+receipt to check the current firmware/configuration and exact after-state, then
+produce a **new** expiring rollback plan requiring confirmation. It never restores
+an expired approval. A started-only receipt is an uncertain operation and cannot
+be automatically retried or rolled back. If storage fails after submission, inspect
+current state before further action.
+
+This does not recover provenance for mappings created before receipts were enabled.
+An old `mcp:` label or lost plan ID alone does not establish safe deletion ownership.
+Batch and combined policy/NAT recovery are not yet supported by this receipt path.
+
+### Combined forwarding lifecycle
+
+The separately opt-in [complete WAN lifecycle](forwarding-lifecycle.md) implements
+exact selection, dependency checks, disabled policy creation, NAT creation and
+allow activation with durable step recovery. It uses the explicitly disclosed
+IPv4 source-network scope below, not the unsupported exact-original-IP variant.
+It is locally tested, not deployed or live-write-tested. A separate permission
+review is required before installing its pinned helper and enabling the catalog.
+
+The reviewed native ordinary-allow path currently generates both address families.
+An IPv4 `origDst` is copied into the IPv6 conntrack matcher, which the isolated
+kernel contract test rejects. Therefore the combined writer is **not enabled**
+with this requested original-destination restriction. The implementation does not
+silently omit the restriction, set UPnP bypass flags, edit firmware, or treat an
+IPv6 restore error as successful enforcement. The exact-original-address variant requires a validated native family-specific
+path before it can ship.
+
+Firewalla’s [manual forwarding guide](https://help.firewalla.com/hc/en-us/articles/1500009502622-Create-Port-Forwarding-on-Gold-Purple-Orange-Series)
+describes a separate ingress permission on the internal port, optionally restricted
+to selected sources. Source-contract tests also show a native candidate using an
+IPv4 source network, device scope, internal port, protocol and WAN binding, without
+the original destination IP. Its IPv6 source set is empty under the reviewed policy
+contract. That is a different permission scope: it does not restrict the original
+public destination address. It must not silently replace an exact-address plan.
+The private app’s precise request payload has not been verified.
+
+Native policy batches execute sequentially, and kernel enforcement failures may
+be logged without undoing already saved configuration or other successful rules.
+Neither a successful management response nor a saved policy proves complete
+enforcement. A future combined executor must journal each step, inspect uncertain
+outcomes, and verify the effective rules before reporting success.
+
+Legacy adoption is separately validated as a fresh exact-object operation: the
+selected mapping must match its complete fingerprint and explicit target/scope,
+have an eligible MCP tag and a strict supported shape, and have a complete,
+unshared dependency report. This is not historical ownership proof and does not
+revive an old approval. The lifecycle planner consumes the validated selection and bounded policy
+projection. Incomplete inheritance or indirect dependencies block removal rather
+than being treated as absence.
+
+
+#### Exposure of the candidate source-scoped alternative
+
+The opt-in lifecycle uses an explicit IPv4 source-network match with a
+positive IPv4 set and an empty IPv6 set; it must not be replaced with the general
+Internet target, which can match both families. The empty-set and rendered-rule
+conditions require verification before reporting enforcement.
+
+Without `origDst`, the allowance is not limited to one public destination address.
+It can match traffic through another address on the selected WAN if routing or
+another NAT mapping delivers it to the same device and approved internal port.
+It does not itself create that other mapping. Ordinary native allow rules also
+lack a DNAT-state requirement: otherwise matching, directly routed IPv4 traffic
+can qualify. Retaining `origDport` restricts the original port, not whether NAT
+occurred. These differences must appear in the preview and confirmation.
+
+For a TCP-only plan, UDP and other ports are outside the candidate. Device scope
+follows the device's native address set rather than pinning the allow to just one
+internal IPv4 address; the NAT destination remains explicitly pinned. Existing
+policy precedence and network reachability still affect the outcome. No assertion
+about a particular device's IPv6 configuration follows from these source tests.

@@ -15,6 +15,7 @@ async def render():
             'read':(Config(**base),dict(readonly_catalog=True)),
             'vpn':(Config(**base,vpn_writes_enabled=True),dict(vpn_write_catalog=True)),
             'vpn+capture':(Config(**base,vpn_writes_enabled=True,capture_enabled=True),dict(vpn_write_catalog=True)),
+            'combined+lifecycle':(Config(**base,writes_enabled=True,forwarding_lifecycle_enabled=True,forwarding_recovery_directory=str(ledger)),{}),
             'combined+capture':(Config(**base,vpn_writes_enabled=True,writes_enabled=True,capture_enabled=True),{}),
         }
         catalog={};counts={}

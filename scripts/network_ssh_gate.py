@@ -14,15 +14,19 @@ import sys
 READ_DIGEST = 'REPLACE_WITH_REVIEWED_REMOTE_SHA256'
 IMPORT_DIGEST = 'REPLACE_WITH_REVIEWED_IMPORT_SHA256'
 CAPTURE_DIGEST = 'REPLACE_WITH_REVIEWED_CAPTURE_SHA256'
+FORWARD_DIGEST = 'REPLACE_WITH_REVIEWED_FORWARD_SHA256'
 ALLOWED = frozenset('forward_interfaces managed_workflow_state membership_snapshot saved_vpn_profiles service_features control_state app_catalog control_rules device_flows alarm_summaries policy_summaries flow_sample services inventory device_policy vpn_interfaces traffic alarm_count dns_config conntrack capabilities health network device vpn mappings firewall ipsets connections tcp dns'.split())
 
 
-def validated(command, read_digest=READ_DIGEST, import_digest=IMPORT_DIGEST, import_path=None, capture_digest=CAPTURE_DIGEST):
+def validated(command, read_digest=READ_DIGEST, import_digest=IMPORT_DIGEST, import_path=None, capture_digest=CAPTURE_DIGEST, forward_digest=FORWARD_DIGEST, forward_path=None):
     if not isinstance(command,str) or len(command)>131072: raise ValueError('command bound')
     if not re.fullmatch(r'[a-f0-9]{64}',read_digest) or not re.fullmatch(r'[a-f0-9]{64}',import_digest):
         raise ValueError('reviewed pins required')
-    if command=='firewalla-vpn-import-v1':
-        path=import_path or '/home/pi/.ssh/firewalla-mcp-vpn-import.pyz'
+    if command in ('firewalla-vpn-import-v1','firewalla-forward-lifecycle-v1'):
+        forwarding=command=='firewalla-forward-lifecycle-v1'
+        expected=forward_digest if forwarding else import_digest
+        if not re.fullmatch(r'[a-f0-9]{64}',expected):raise ValueError('reviewed helper pin required')
+        path=(forward_path or '/home/pi/.ssh/firewalla-mcp-forward.pyz') if forwarding else (import_path or '/home/pi/.ssh/firewalla-mcp-vpn-import.pyz')
         parent=os.lstat(os.path.dirname(path))
         if not stat.S_ISDIR(parent.st_mode) or parent.st_uid!=os.getuid() or stat.S_IMODE(parent.st_mode)!=0o700:
             raise ValueError('unsafe helper parent')
@@ -32,7 +36,7 @@ def validated(command, read_digest=READ_DIGEST, import_digest=IMPORT_DIGEST, imp
             if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or stat.S_IMODE(info.st_mode)!=0o600 or info.st_nlink!=1 or info.st_size>262144:
                 raise ValueError('unsafe import helper')
             data=os.read(fd,262145)
-            if len(data)!=info.st_size or hashlib.sha256(data).hexdigest()!=import_digest:
+            if len(data)!=info.st_size or hashlib.sha256(data).hexdigest()!=expected:
                 raise ValueError('import helper pin mismatch')
             os.set_inheritable(fd,True)
             # Execute the verified open inode, not a second lookup of its pathname.

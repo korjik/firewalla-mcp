@@ -203,6 +203,7 @@ The default catalog has 37 inspection tools; opt-in VPN, VPN + capture and combi
 | [Managed controls](docs/managed-writes.md) | Device/app/DNS operations and firmware restrictions |
 | [VPN operations](docs/vpn-mcp-writes.md) | Lifecycle, device switching and router-local inactive import |
 | [Persistent forwarding and plans](docs/persistent-forwarding.md) | Persistent mappings, compound plans and verification limits |
+| [Complete WAN forwarding lifecycle](docs/forwarding-lifecycle.md) | Opt-in NAT plus scoped IPv4 ingress, exact removals and durable recovery |
 | [Traffic capture](docs/traffic-capture.md) | Scope, metadata, limits and cleanup |
 | [Troubleshooting](docs/troubleshooting.md) | Startup, access and diagnostic issues |
 | [Security](SECURITY.md) | Trust boundaries and vulnerability reporting |
