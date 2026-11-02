@@ -59,7 +59,11 @@ def identity(row):
 def reject_duplicate(rows,value):
     desired=identity(value)
     for row in rows:
-        if row.get('identity_complete') is not True:raise ValueError('Incomplete policy identity')
+        # The pinned native isEqual contract compares primary selectors before
+        # ancillary metadata. Unknown metadata cannot turn a disjoint policy
+        # into a duplicate. Legacy type/target aliases can, so reject those.
+        if not isinstance(row.get('type'),str) or row.get('legacy_identity'):
+            raise ValueError('Incomplete or legacy policy identity')
         candidate=identity(row)
         # Primary scope equality is intentionally broader than isEqual. Native
         # constructor defaults (false, regular sequence, numeric coercion) must
@@ -67,6 +71,7 @@ def reject_duplicate(rows,value):
         # ancillary semantics cause a conservative conflict, not an update.
         primary=('type','target','scope','tag','guids','protocol','direction','action','localPort','origDport','owanUUID')
         if all(candidate[k]==desired[k] for k in primary):
+            if row.get('identity_complete') is not True:raise ValueError('Incomplete policy identity for matching selectors')
             raise ValueError('Existing policy, including disabled or differently prioritized policy; preserve it')
 
 
@@ -92,6 +97,7 @@ for _,id in ipairs(ids) do
  end
  for _,f in ipairs(fields) do local v=redis.call('HGET',key,f); if v then row[f]=v end end
  row.pid=id;row.identity_complete=complete
+ row.legacy_identity=redis.call('HEXISTS',key,'i.type')==1 or redis.call('HEXISTS',key,'i.target')==1
  -- Bind every original field without returning unselected values. Sorting keys
  -- avoids HGETALL enumeration order affecting the canonical fingerprint.
  table.sort(names);local all={};for _,f in ipairs(names) do if not observational[f] then table.insert(all,f);table.insert(all,redis.call('HGET',key,f)) end end
@@ -109,9 +115,10 @@ def read_projection(run):
     if not isinstance(rows,list) or len(rows)>512:raise ValueError('Projection bound')
     seen=set()
     for row in rows:
-        if not isinstance(row,dict) or set(row)-set(PROJECTION_FIELDS)-{'identity_complete','full_fingerprint'}:raise ValueError('Projection fields')
+        if not isinstance(row,dict) or set(row)-set(PROJECTION_FIELDS)-{'identity_complete','full_fingerprint','legacy_identity'}:raise ValueError('Projection fields')
         pid=row.get('pid')
         if not isinstance(pid,str) or not re.fullmatch('[0-9]{1,20}',pid) or pid in seen:raise ValueError('Projection identity')
         seen.add(pid)
+        if 'legacy_identity' in row and type(row['legacy_identity']) is not bool:raise ValueError('Legacy identity shape')
         if type(row.get('identity_complete')) is not bool or not re.fullmatch('[a-f0-9]{40}',row.get('full_fingerprint','')):raise ValueError('Projection completeness')
     return rows

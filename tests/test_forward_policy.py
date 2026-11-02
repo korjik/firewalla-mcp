@@ -45,3 +45,17 @@ def test_native_scope_filter_cannot_hide_duplicate():
     desired=native_allow(*ARGS)
     existing={**desired,'scope':desired['scope']+['not-a-mac'],'identity_complete':True}
     with pytest.raises(ValueError,match='scope'):reject_duplicate([existing],desired)
+
+
+@pytest.mark.parametrize('field,value',[('type','category'),('action','block'),('localPort',None),('scope',['02:00:00:00:00:02']),('direction','outbound')])
+def test_unrelated_incomplete_metadata_cannot_block_new_allow(field,value):
+    desired=native_allow(*ARGS)
+    row={**desired,field:value,'identity_complete':False,'legacy_identity':False}
+    reject_duplicate([row],desired)
+
+def test_matching_incomplete_identity_still_blocks_and_legacy_aliases_never_skip():
+    desired=native_allow(*ARGS)
+    with pytest.raises(ValueError,match='Incomplete'):
+        reject_duplicate([{**desired,'identity_complete':False}],desired)
+    with pytest.raises(ValueError,match='legacy'):
+        reject_duplicate([{**desired,'type':'category','identity_complete':False,'legacy_identity':True}],desired)

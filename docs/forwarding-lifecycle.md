@@ -3,8 +3,8 @@
 This opt-in workflow combines persistent IPv4 TCP NAT mappings and scoped inbound
 allow policies under one host-confirmed plan. It is not enabled by the normal
 read-only or VPN-only catalog. Local contract, mocked lifecycle/recovery and
-isolated packet tests are available; this implementation has not been deployed
-or live-write-tested on an appliance.
+isolated packet tests are available. Deployment and read-only inspection/preview
+have been exercised; native lifecycle mutations have not been live-write-tested.
 
 ## Scope shown before confirmation
 
@@ -110,3 +110,13 @@ the source-set constraint. It does not test Firewalla's complete packet path.
 The mock native tests cover create, exact legacy mapping selection, preservation,
 delete, restart, partial execution, native ID replacement and conditional recovery.
 No successful mock or isolated test is a claim of live appliance enforcement.
+
+## Existing policy metadata
+
+Creation compares the reviewed native identity selectors before considering
+unknown ancillary fields. A provably different policy does not block a new allow
+merely because it contains additional metadata. Matching incomplete identities,
+legacy identity aliases and malformed scopes still fail closed. This distinction
+does not relax exact deletion: unresolved inherited/shared dependencies continue
+to block adoption and removal. Preserving existing NAT and adding missing allows
+is a different plan from deleting and recreating existing configuration.
