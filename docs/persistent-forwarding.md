@@ -152,3 +152,9 @@ For TCP+UDP, use `preview_interface_forward_plan` with two actions on the same U
 Build and test the new image without router credentials first. Preserve the prior image, configuration, helper/gate files and integration identity. The combined catalog requires explicitly enabled host-confirmed general writes, protected audit/consumption storage and an installed restricted network gate with the reviewed helper hash. Gate changes grant network-control access and require separate deployment authorization. Preserve existing VPN/import/capture permissions only when intended; do not use the broader managed-control gate merely to enable forwarding.
 
 After an authorized upgrade, refresh the existing gateway/client catalog, verify tool schemas, health and harmless previews. Do not apply a real forwarding plan as a deployment smoke test. Roll back the image, configuration and matching gate pins together if verification fails; keep the persistent consumption ledger and audit history. No OAuth recreation or SSH key rotation is necessary.
+
+Forwarding previews distinguish an exact enabled stored mapping (`no_change`)
+from a possible overlap (`conflict`, with bounded source/count evidence). Neither
+result proves effective enforcement or external reachability. Kernel overlap
+checks inspect actual DNAT jump targets and protocol/port selectors; conntrack
+state labels and unrelated DNS redirects are not forwarding duplicates.

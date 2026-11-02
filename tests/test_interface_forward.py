@@ -198,3 +198,19 @@ def test_unaddressed_network_null_subnets_remains_discoverable(network):
     network['rows'][WAN]['ip4_subnets']=None
     rows=remote.forward_networks()
     assert next(r for r in rows if r['uuid']==WAN)['subnets']==[]
+
+def test_exact_existing_mapping_is_not_a_conflict(wan):
+    state,_=wan;s=wan_spec()
+    row=remote.forward_value(s);row['description']='existing owner'
+    state['maps']=[row]
+    result=remote.managed_forward({'spec':s,'mode':'preview'})
+    assert result['present'] and not result['conflict'] and state['calls']==0
+
+
+def test_different_existing_mapping_is_conflict(wan):
+    state,_=wan;s=wan_spec()
+    row=remote.forward_value(s);row['toIP']='192.0.2.99'
+    state['maps']=[row]
+    result=remote.managed_forward({'spec':s,'mode':'preview'})
+    assert result['conflict'] and result['conflict_details']['stored_mapping_count']==1
+    assert state['calls']==0

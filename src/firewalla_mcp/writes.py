@@ -170,7 +170,11 @@ class WriteManager:
             if self.site_binding(box)!=binding:
                 raise ValueError("Box configuration changed during preview")
             state=result["data"]
+            if state.get("conflict"):
+                return {"status":"conflict","reason":"Potential forwarding overlap; no plan created and no mapping changed.","evidence":copy.deepcopy(state.get("conflict_details",{}))}
             if state["present"]:
+                if spec["kind"].startswith("managed_") and "forward" in spec["kind"]:
+                    return {"status":"no_change","reason":"Exact enabled configured mapping already exists; enforcement and external reachability are not proven."}
                 return {"status":"no_change","reason":"Desired state or potentially duplicate rule already exists; no replacement is permitted."}
             return self.new_plan(box,spec,state,"apply")
 
