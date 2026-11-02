@@ -10,12 +10,14 @@ from firewalla_mcp.server import build_server
 async def render():
     with tempfile.TemporaryDirectory() as d:
         ledger=Path(d)/'ledger';ledger.mkdir(mode=0o700)
+        grants=Path(d)/'diagnostic-grants';grants.mkdir(mode=0o700)
         base=dict(sites={},approval_consumed_directory=str(ledger),audit_file=str(Path(d)/'audit'),vpn_target_policy='approval_bound',vpn_confirmation_mode='host_confirmed',write_confirmation_mode='host_confirmed')
         modes={
             'read':(Config(**base),dict(readonly_catalog=True)),
             'vpn':(Config(**base,vpn_writes_enabled=True),dict(vpn_write_catalog=True)),
             'vpn+capture':(Config(**base,vpn_writes_enabled=True,capture_enabled=True),dict(vpn_write_catalog=True)),
             'combined+lifecycle':(Config(**base,writes_enabled=True,forwarding_lifecycle_enabled=True,forwarding_recovery_directory=str(ledger)),{}),
+            'combined+diagnostic-grants':(Config(**base,writes_enabled=True,diagnostic_grants_enabled=True,diagnostic_grants_directory=str(grants)),{}),
             'combined+capture':(Config(**base,vpn_writes_enabled=True,writes_enabled=True,capture_enabled=True),{}),
         }
         catalog={};counts={}

@@ -73,6 +73,9 @@ class Config(BaseModel):
     audit_file: str | None = None
     forwarding_recovery_directory: str | None = None
     forwarding_lifecycle_enabled: bool = False
+    diagnostic_grants_enabled: bool = False
+    diagnostic_grants_directory: str | None = None
+    diagnostic_grants_deny_addresses: list[str] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -88,6 +91,10 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def explicit_host_mode(self):
+        if self.diagnostic_grants_enabled and (not self.writes_enabled or not self.diagnostic_grants_directory):
+            raise ValueError("Diagnostic grants require general host-confirmed writes and persistent storage")
+        for address in self.diagnostic_grants_deny_addresses:
+            if str(ip_address(address))!=address:raise ValueError("Canonical diagnostic deny address required")
         if self.forwarding_lifecycle_enabled and (not self.writes_enabled or not self.forwarding_recovery_directory):
             raise ValueError("Forwarding lifecycle requires general host-confirmed writes and persistent recovery storage")
         if (self.writes_enabled and self.write_confirmation_mode != "host_confirmed") or (self.vpn_writes_enabled and self.vpn_confirmation_mode != "host_confirmed"):

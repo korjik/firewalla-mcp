@@ -1,6 +1,8 @@
 import asyncio
 import json
 import shlex
+import time
+import math
 from pathlib import Path
 from .models import Site
 
@@ -43,12 +45,15 @@ class SSHTransport:
     def __init__(self):
         self.limit = asyncio.Semaphore(4)
 
-    async def run(self, site: Site, operation: str, arguments: dict):
+    async def run(self, site: Site, operation: str, arguments: dict, *, dispatch_deadline=None):
         async with self.limit:
             proc = None
             try:
+                command=remote_command(operation, arguments)
+                if dispatch_deadline is not None and (type(dispatch_deadline) not in (int,float) or not math.isfinite(dispatch_deadline) or time.time()>=dispatch_deadline):
+                    return {"status":"unavailable","reason":"Diagnostic grant expired before SSH dispatch; no new request sent."}
                 proc = await asyncio.create_subprocess_exec(
-                    *ssh_argv(site, remote_command(operation, arguments)),
+                    *ssh_argv(site, command),
                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL)
                 deadline = 115 if operation == "managed_write" and arguments.get("spec", {}).get("kind") in ("managed_lifecycle", "managed_forward_batch") else 25

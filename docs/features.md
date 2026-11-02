@@ -40,3 +40,10 @@ explicit IPv4 source scope, persistent NAT plus inbound policy, exact removals a
 durable restart recovery. This is locally tested, not live-write-tested or enabled
 by default. Unknown policy semantics, inherited/indirect dependencies and ambiguous
 objects fail closed. It does not expand other managed or kernel write permissions.
+
+## Optional exact diagnostic grants
+
+The local opt-in [diagnostic grant workflow](diagnostic-grants.md) adds owner-confirmed
+exact source-box/IPv4/TCP-port grants and revocation with bounded expiry/attempts.
+It preserves legacy `probe_networks`, does not alter router policies, and is not
+live-deployed or live-grant-tested. See the generated reference for all four tools.

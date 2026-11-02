@@ -22,6 +22,7 @@ def native_fixture(monkeypatch,tmp_path):
     monkeypatch.setattr(native.remote,'forward_kernel_evidence',lambda s:{'nat_rule_observed':bool(snapshot(s)['owned']),'vpn_ingress_link_observed':True})
     monkeypatch.setattr(native.remote,'run',lambda args:'')
     monkeypatch.setattr(native,'verify_policy',lambda *args:True)
+    monkeypatch.setattr(native,'hairpin_evidence',lambda run,value:any(r['toIP']==value['toIP'] and r['protocol']==value['protocol'] and r['toPort']==value['toPort'] for r in store['maps']))
     def management(command,item,target,value,*extra):
         store['calls'].append((command,item,copy.deepcopy(value)))
         if item=='portforward':raise AssertionError('wrong API')

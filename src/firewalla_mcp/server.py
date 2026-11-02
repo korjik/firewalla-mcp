@@ -37,6 +37,36 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         from .vpn_import_mcp import ImportManager
         imports = ImportManager(config, import_transport)
 
+    grants=None
+    if config.diagnostic_grants_enabled:
+        if readonly_catalog or vpn_write_catalog:raise ValueError("Diagnostic grants require general catalog")
+        from .probe_grants import ProbeGrants
+        grants=ProbeGrants(writes)
+
+        @mcp.tool(annotations=READ)
+        async def preview_diagnostic_grant(box_name: BoxName, address: str, ports: list[Port], ttl_seconds: int = 600) -> dict[str, Any]:
+            """Preview an exact source-box/literal-IPv4/TCP-port diagnostic grant.
+            One to eight ports, 60–3600 seconds, at most 16 handshakes. No DNS names,
+            subnets, payloads or probes. Show scope/expiry and obtain explicit owner
+            confirmation before apply_diagnostic_grant_plan. Host enforces consent.
+            """
+            return grants.preview_grant(box_name,address,ports,ttl_seconds)
+
+        @mcp.tool(annotations=READ)
+        async def preview_diagnostic_revoke(grant_id: str) -> dict[str, Any]:
+            """Preview revoking one additional diagnostic grant. Does not revoke legacy probe_networks permissions or other grants. Confirm before apply."""
+            return grants.preview_revoke(grant_id)
+
+        @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=False))
+        async def apply_diagnostic_grant_plan(plan_id: str) -> dict[str, Any]:
+            """Apply an exact grant/revoke preview only after explicit owner confirmation through the trusted host. Persists diagnostic permissions, not router rules. No probe runs. Exact state, expiry and replay guards apply."""
+            return grants.apply(plan_id)
+
+        @mcp.tool(annotations=READ)
+        async def diagnostic_grants() -> dict[str, Any]:
+            """Read private exact diagnostic grants, usage, revocation and expiry. No probes."""
+            return grants.inventory()
+
     if config.forwarding_lifecycle_enabled:
         if readonly_catalog or vpn_write_catalog:raise ValueError("Forwarding lifecycle requires the general catalog")
         from .forward_manager import ForwardManager
@@ -275,10 +305,13 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
 
     @mcp.tool(annotations=READ)
     async def tcp_probe(box_name: BoxName, address: str, port: Port) -> dict[str, Any]:
-        """Attempt one TCP handshake to a configured allowed IP; no payload sent."""
+        """Attempt one TCP handshake; no payload. Legacy probe_networks authorizes its existing IP scope; otherwise an active exact source/IP/port diagnostic grant is required when configured."""
         box(box_name)
         TypeAdapter(Port).validate_python(port)
-        address = config.target(box_name, address)
+        try:address = config.target(box_name, address)
+        except ValueError:
+            if grants is None:raise
+            return await grants.probe(box_name,address,port)
         return await read(box_name, "tcp", address=address, port=port)
 
     @mcp.tool(annotations=READ)
@@ -516,6 +549,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         return {"configured_contracts":contracts,"enabled": config.writes_enabled and not readonly_catalog,
                 "catalog_mode":"read_only" if readonly_catalog else "full",
                 "forwarding_lifecycle_enabled":config.forwarding_lifecycle_enabled,
+                "diagnostic_grants_enabled":config.diagnostic_grants_enabled,
                 "confirmation_mode":config.write_confirmation_mode,
                 "approval_workflow":writes.approval_next_step() if config.writes_enabled else None,
                 "executable_write_tools_exposed":not readonly_catalog,

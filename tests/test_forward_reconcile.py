@@ -61,10 +61,11 @@ def selection_for(row):
 def test_exact_legacy_adoption_requires_all_evidence():
     from firewalla_mcp.forward_reconcile import adopt_mapping_removal
     r=legacy_mapping();s=selection_for(r)
-    dep={'complete':True,'referring_policy_ids':[],'shared':False}
+    from firewalla_mcp.forward_dependencies import require_mapping_removal
+    dep=require_mapping_removal(r,[r])
     p=adopt_mapping_removal([r],s,dep)
     assert p['execution_enabled'] is False and p['authorization_required'].startswith('fresh')
-    with pytest.raises(ValueError,match='dependencies'):adopt_mapping_removal([r],s,{'complete':False})
+    with pytest.raises(ValueError,match='evidence'):adopt_mapping_removal([r],s,{'complete':False})
     with pytest.raises(ValueError,match='ambiguous'):adopt_mapping_removal([r,r],s,dep)
     changed={**r,'description':'mcp:'+'b'*32}
     with pytest.raises(ValueError,match='changed'):adopt_mapping_removal([changed],s,dep)

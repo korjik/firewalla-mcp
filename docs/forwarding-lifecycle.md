@@ -29,7 +29,8 @@ kernel evidence proves service availability or external reachability.
 2. `preview_forwarding_lifecycle` preserves equivalent configured objects, creates
    new allows disabled, creates NAT, then enables the allows. Exact removals are
    separately listed and checked for dependencies. A label alone never authorizes
-   deletion. Unknown inheritance/references or policy fields block removal.
+   deletion. Exact native selectors and shared hairpin resources are checked.
+   Policy applicability is reported separately and does not confer deletion ownership.
 3. Show the entire preview, exposure, ordered steps and maintenance deadline to the
    user. Obtain explicit confirmation, with no concurrent app/API policy or mapping
    edits during the window.
@@ -117,6 +118,16 @@ Creation compares the reviewed native identity selectors before considering
 unknown ancillary fields. A provably different policy does not block a new allow
 merely because it contains additional metadata. Matching incomplete identities,
 legacy identity aliases and malformed scopes still fail closed. This distinction
-does not relax exact deletion: unresolved inherited/shared dependencies continue
-to block adoption and removal. Preserving existing NAT and adding missing allows
+does not relax exact deletion: ambiguous native selectors and unresolved/shared
+structural NAT or hairpin resources block adoption and removal. Global block and
+DNS policies are preserved, not mistaken for objects owned by a NAT mapping.
+Selected companion-policy deletion still requires strict identity/reference checks. Preserving existing NAT and adding missing allows
 is a different plan from deleting and recreating existing configuration.
+
+The native removal selector ignores descriptions and can match more than one
+stored mapping. The lifecycle requires exactly one match, rejects wildcard
+selectors and blocks shared destination/protocol/internal-port hairpin resources
+even across WANs. It checks native-shaped kernel hairpin evidence before removal
+and verifies its absence afterward. A later exact, verified replacement may own
+the same kernel tuple while the old stored identity must remain absent.
+These guards do not make native operations atomic against concurrent app edits.

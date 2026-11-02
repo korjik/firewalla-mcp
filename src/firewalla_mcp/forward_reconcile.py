@@ -98,7 +98,9 @@ def adopt_mapping_removal(mappings, selection, dependency_report):
     if not isinstance(row['description'],str) or not re.fullmatch('mcp:[a-f0-9]{32}',row['description']):raise ValueError('not an eligible MCP-tagged mapping')
     fingerprint=digest(row)
     if selection['expected_fingerprint']!=fingerprint:raise ValueError('selected object changed')
-    if not isinstance(dependency_report,dict) or dependency_report.get('complete') is not True or dependency_report.get('referring_policy_ids')!=[] or dependency_report.get('shared') is not False or dependency_report.get('unresolved_policy_ids',[])!=[]:raise ValueError('unresolved dependencies; no adoption')
+    from .forward_dependencies import require_mapping_removal
+    structural=require_mapping_removal(row,mappings)
+    if dependency_report!=structural:raise ValueError('Structural evidence changed; no adoption')
     return {'kind':'mapping','value':copy.deepcopy(row),'fingerprint':fingerprint,
             'inventory_fingerprint':digest(mappings),'authorization_required':'fresh exact-object removal confirmation',
             'provenance':'explicitly inspected legacy adoption, not historical ownership proof',

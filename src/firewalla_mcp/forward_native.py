@@ -11,7 +11,7 @@ import time
 from . import remote
 from .forward_policy import native_allow, read_projection, reject_duplicate, IDENTITY_FIELDS
 from .forward_enforcement import verify_policy
-from .forward_dependencies import dependencies
+from .forward_dependencies import require_mapping_removal, hairpin_evidence
 from .forward_transaction import transition, bind_created_instance
 from .writes import digest
 
@@ -92,7 +92,7 @@ class NativeForwardAdapter:
                 try:spec=self.mapping_spec(row['value'])
                 except ValueError:continue  # unrelated mappings are preserved, not asserted
                 evidence=remote.forward_kernel_evidence(spec)
-                if not evidence['nat_rule_observed'] or not evidence['vpn_ingress_link_observed']:return False
+                if not evidence['nat_rule_observed'] or not evidence['vpn_ingress_link_observed'] or not hairpin_evidence(remote.run,row['value']):return False
             if key.startswith('policy:mcp:'):
                 value=row['value'];pid=row['instance']['id'];sets={}
                 if row['enabled']:
@@ -107,7 +107,17 @@ class NativeForwardAdapter:
             if row['kind']=='mapping':
                 if item['key'] in state['objects']:raise ValueError('Removed mapping still present')
                 spec=self.mapping_spec(row['value'])
-                if remote.forward_kernel_evidence(spec)['nat_rule_observed']:return False
+                # A later verified replacement may intentionally recreate the
+                # same kernel tuple under a new stored ownership identity. The
+                # previous dispatch must already have proved absence; now bind
+                # the tuple to exactly one strictly typed current replacement.
+                replacements=[]
+                for current_key,current in state['objects'].items():
+                    if not current_key.startswith('mapping:mcp:') or current['kind']!='mapping':continue
+                    if {k:v for k,v in current['value'].items() if k!='description'}=={k:v for k,v in row['value'].items() if k!='description'}:
+                        self.mapping_spec(current['value']);replacements.append(current)
+                if len(replacements)>1:return False
+                if not replacements and (remote.forward_kernel_evidence(spec)['nat_rule_observed'] or hairpin_evidence(remote.run,row['value'])):return False
             else:
                 value=self.policy_value(row['value']);pid=row['instance']['id']
                 if any(r.get('instance',{}).get('id')==pid for r in state['objects'].values()):return False
@@ -130,8 +140,8 @@ class NativeForwardAdapter:
             if op in ('create','restore'):
                 if snapshot['collisions'] or snapshot['owned']:raise ValueError('Mapping conflict')
             elif op=='remove':
-                report=dependencies(value,self.policies,inventory_complete=True)
-                if not report['absence_proven']:raise ValueError('Unresolved mapping dependencies')
+                require_mapping_removal(value,snapshot['maps'])
+                if not hairpin_evidence(remote.run,value):raise ValueError('Native hairpin rule missing before removal')
                 if len(snapshot['owned'])!=1 or len(snapshot['collisions'])!=1 or not remote.forward_matches(snapshot['owned'][0],spec):raise ValueError('Mapping identity drift')
             else:raise ValueError('Mapping operation')
             deadline()
@@ -163,7 +173,7 @@ class NativeForwardAdapter:
             if allocated_pid is not None and after['objects'].get(step['key'],{}).get('instance',{}).get('id')!=allocated_pid:continue
             if op=='remove':
                 if kind=='mapping':
-                    if remote.forward_kernel_evidence(spec)['nat_rule_observed']:continue
+                    if remote.forward_kernel_evidence(spec)['nat_rule_observed'] or hairpin_evidence(remote.run,value):continue
                 else:
                     remaining=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
                     if not verify_policy(value,pid,*remaining,{},False):continue

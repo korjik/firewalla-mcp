@@ -6,7 +6,7 @@ This module is not registered until the transport and deployment gates are ready
 import copy
 import secrets
 from .forward_policy import native_allow,scope_disclosure,reject_duplicate
-from .forward_dependencies import dependencies
+from .forward_dependencies import dependencies, require_mapping_removal
 from .forward_reconcile import adopt_mapping_removal
 from .forward_transaction import build_plan
 from .writes import digest
@@ -43,7 +43,11 @@ async def preview(adapter,box,binding,actions,removals=()):
     for key,row in selected.items():
         if row['kind']!='mapping':continue
         spec=adapter.mapping_spec(row['value'])
-        deps=dependencies(row['value'],[p for p in adapter.policies if p['pid'] not in removed_pids],inventory_complete=True)
+        maps=[r['value'] for r in initial['objects'].values() if r['kind']=='mapping']
+        deps=require_mapping_removal(row['value'],maps)
+        applicability=dependencies(row['value'],[p for p in adapter.policies if p['pid'] not in removed_pids],inventory_complete=True)
+        disclosures.append({'removal_key':key,'structural_evidence':deps,'preserved_policy_applicability':applicability,
+                            'policy_warning':'Applicability is not deletion ownership or effective permission. Nonselected policies remain unchanged.'})
         selection={'device':spec['device'],'destination':spec['destination_ip'],'interface_uuid':spec['interface_uuid'],
                    'protocol':spec['protocol'],'external_port':spec['external_port'],'destination_port':spec['destination_port'],
                    'expected_fingerprint':digest(row['value'])}

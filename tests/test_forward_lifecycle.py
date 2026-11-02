@@ -43,15 +43,17 @@ async def test_selected_drift_cannot_remove(native_fixture):
         await preview(adapter,'router-a','binding',[],[{'key':'mapping:mcp:'+'a'*32,'fingerprint':'f'*64}])
     assert store['calls']==[]
 
-async def test_unknown_policy_dependency_preserves_mapping(native_fixture):
+async def test_unknown_policy_metadata_is_preserved_not_nat_ownership(native_fixture):
     adapter,tx,spec,store=native_fixture
     from firewalla_mcp.remote import forward_value
     existing={**forward_value(spec),'active':True};store['maps']=[existing]
     store['policies']=[{'pid':'999','timestamp':'1','identity_complete':False,'full_fingerprint':'b'*40}]
     state=await adapter.snapshot();key='mapping:'+existing['description']
-    with pytest.raises(ValueError,match='dependencies'):
-        await preview(adapter,'router-a','binding',[],[{'key':key,'fingerprint':digest(state['objects'][key])}])
-    assert store['calls']==[]
+    plan=await preview(adapter,'router-a','binding',[],[{'key':key,'fingerprint':digest(state['objects'][key])}])
+    assert [s['key'] for s in plan['steps']]==[key]
+    assert plan['disclosures'][0]['preserved_policy_applicability']['complete'] is False
+    assert (await tx.execute(plan,'binding'))['outcome']=='applied'
+    assert len(store['policies'])==1 and not store['maps']
 
 async def test_delete_then_restart_restore_binds_new_policy_id(native_fixture):
     adapter,tx,spec,store=native_fixture
@@ -76,3 +78,39 @@ async def test_exact_enabled_complete_set_is_no_change(native_fixture):
     calls=len(store['calls'])
     assert (await preview(adapter,'router-a','binding',[ACTIONS[1]]))['status']=='no_change'
     assert len(store['calls'])==calls
+
+async def test_global_dns_block_and_outbound_metadata_preserved_during_replacement(native_fixture):
+    adapter,tx,spec,store=native_fixture
+    from firewalla_mcp.remote import forward_value
+    existing={**forward_value({**spec,'external_port':443,'destination_port':443}),'active':True};store['maps']=[existing]
+    policies=[{'pid':str(n),'timestamp':'1','identity_complete':complete,'full_fingerprint':str(n)*40,'type':kind,'action':action,'direction':direction,'target':target}
+              for n,kind,action,direction,target,complete in [(1,'mac','block','inbound','TAG',True),(2,'dns','address','bidirection','example.org',True),(3,'category','allow','outbound','games',False)]]
+    store['policies']=copy.deepcopy(policies)
+    state=await adapter.snapshot();key='mapping:'+existing['description']
+    plan=await preview(adapter,'router-a','binding',[ACTIONS[1]],[{'key':key,'fingerprint':digest(state['objects'][key])}])
+    assert plan['disclosures'][0]['preserved_policy_applicability']['shared'] is True
+    assert (await tx.execute(plan,'binding'))['outcome']=='applied'
+    assert store['policies'][:3]==policies
+    assert all(c[2].get('policyID') not in ('1','2','3') for c in store['calls'])
+
+async def test_shared_resource_rejected_before_preview_or_dispatch(native_fixture):
+    adapter,tx,spec,store=native_fixture
+    from firewalla_mcp.remote import forward_value
+    existing={**forward_value(spec),'active':True}
+    store['maps']=[existing,{**existing,'dport':'8443','wanUUID':'22222222-2222-4222-8222-222222222222','description':'mcp:'+'f'*32}]
+    state=await adapter.snapshot();key='mapping:'+existing['description'];step={'operation':'remove','key':key,'before':state['objects'][key],'after':None}
+    with pytest.raises(ValueError,match='hairpin'):
+        await preview(adapter,'router-a','binding',[],[{'key':key,'fingerprint':digest(state['objects'][key])}])
+    import time
+    with pytest.raises(ValueError,match='hairpin'):
+        await adapter.mutate(step,digest(state),time.time()+100)
+    assert store['calls']==[]
+
+async def test_removed_mapping_orphan_hairpin_not_reported_complete(native_fixture,monkeypatch):
+    adapter,tx,spec,store=native_fixture
+    from firewalla_mcp.remote import forward_value
+    from firewalla_mcp import forward_native
+    old={'kind':'mapping','value':{**forward_value(spec),'active':True},'enabled':True}
+    state=await adapter.snapshot()
+    monkeypatch.setattr(forward_native,'hairpin_evidence',lambda *args:True)
+    assert not await adapter.verify(state,removed=[{'key':'mapping:'+old['value']['description'],'before':old}])
