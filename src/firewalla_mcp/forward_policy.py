@@ -17,12 +17,12 @@ PROJECTION_FIELDS=IDENTITY_FIELDS+('disabled','description','timestamp','activat
 def native_allow(device,interface_uuid,source_network,protocol,external_port,internal_port,owner):
     if not isinstance(device,str) or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',device):raise ValueError('device')
     if not isinstance(interface_uuid,str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}',interface_uuid):raise ValueError('WAN UUID')
-    if protocol!='tcp':raise ValueError('Initial complete lifecycle supports TCP only')
+    if protocol not in ('tcp','udp'):raise ValueError('Exact TCP or UDP required')
     if any(type(v) is not int or not 1<=v<=65535 for v in (external_port,internal_port)):raise ValueError('port')
     if not isinstance(owner,str) or not re.fullmatch('[a-f0-9]{32}',owner):raise ValueError('owner token')
     network=str(ipaddress.IPv4Network(source_network,strict=True))
     return {'type':'net','target':network,'scope':[device.upper()],'action':'allow','direction':'inbound',
-            'protocol':'tcp','localPort':str(internal_port),'origDport':str(external_port),'owanUUID':interface_uuid,
+            'protocol':protocol,'localPort':str(internal_port),'origDport':str(external_port),'owanUUID':interface_uuid,
             'description':'mcp:'+owner}
 
 

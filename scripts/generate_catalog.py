@@ -17,6 +17,7 @@ async def render():
             'vpn':(Config(**base,vpn_writes_enabled=True),dict(vpn_write_catalog=True)),
             'vpn+capture':(Config(**base,vpn_writes_enabled=True,capture_enabled=True),dict(vpn_write_catalog=True)),
             'combined+lifecycle':(Config(**base,writes_enabled=True,forwarding_lifecycle_enabled=True,forwarding_recovery_directory=str(ledger)),{}),
+            'combined+app-forwarding':(Config(**base,writes_enabled=True,forwarding_lifecycle_enabled=True,forwarding_app_management_enabled=True,forwarding_recovery_directory=str(ledger)),{}),
             'combined+diagnostic-grants':(Config(**base,writes_enabled=True,diagnostic_grants_enabled=True,diagnostic_grants_directory=str(grants)),{}),
             'combined+capture':(Config(**base,vpn_writes_enabled=True,writes_enabled=True,capture_enabled=True),{}),
         }

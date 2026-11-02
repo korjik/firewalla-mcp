@@ -5,7 +5,7 @@ from typing import Literal, Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import TypeAdapter
-from .models import Config, Name, BoxName, Port, Mac, ForwardAction, LifecycleAction, LifecycleRemoval, ForwardMetadataChange
+from .models import Config, Name, BoxName, Port, Mac, ForwardAction, LifecycleAction, LifecycleRemoval, ForwardMetadataChange, AppMappingSelection, AppPolicySelection, AppRecreateAction
 from .transport import SSHTransport
 from .writes import WriteManager
 from .analysis import summarize_page
@@ -132,6 +132,34 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             ambiguous state blocks recovery; do not clear journals or execution ledger.
             """
             return await forwarding.recover(transaction_id,rollback,maintenance_until)
+
+    if config.forwarding_app_management_enabled:
+        @mcp.tool(annotations=READ)
+        async def inspect_forwarding_app_objects(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, maintenance_until: int) -> dict[str,Any]:
+            """Inspect exact app/MCP NAT objects and eligible explicit inbound allow candidates.
+            Returns IDs, birth and semantic fingerprints; matching ports are not consent.
+            Legacy Internet allows can cover IPv4 and IPv6/direct routed access. Global,
+            inherited, shared or unreviewed policies are not automatically selected.
+            """
+            return await forwarding.inspect_app_objects(box_name,device,destination_ip,interface_uuid,maintenance_until)
+
+        @mcp.tool(annotations=READ)
+        async def preview_forwarding_reset(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, mappings: list[AppMappingSelection], policies: list[AppPolicySelection],
+                recreate: list[AppRecreateAction], all_mappings: bool, maintenance_until: int) -> dict[str,Any]:
+            """Preview exact owner-selected NAT and allow removals and named IPv4 recreation.
+            At most eight selected mappings/policies, four new forwards, 32 ordered steps.
+            all_mappings requires an exact complete inventory, never discovers extra deletions.
+            App selection is explicit adoption, not ownership inferred from labels. Old legacy
+            allows may be dual-stack; recreated forwards are IPv4 DNAT with scoped IPv4 allows.
+            No NAT66. Show every removal/creation and outage/partial-failure risk; get one
+            explicit confirmation, then apply_forwarding_lifecycle. Expiry/drift stops execution;
+            recovery after restart requires fresh confirmation and may allocate new policy IDs.
+            """
+            actions=[{k:v for k,v in a.model_dump().items() if k!='address_family'} for a in recreate]
+            return await forwarding.preview_app_reset(box_name,device,destination_ip,interface_uuid,
+                [m.model_dump() for m in mappings],[p.model_dump() for p in policies],actions,all_mappings,maintenance_until)
 
     if config.capture_enabled:
         from .capture import CaptureManager
@@ -564,6 +592,8 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         return {"configured_contracts":contracts,"enabled": config.writes_enabled and not readonly_catalog,
                 "catalog_mode":"read_only" if readonly_catalog else "full",
                 "forwarding_lifecycle_enabled":config.forwarding_lifecycle_enabled,
+                "forwarding_app_management_enabled":config.forwarding_app_management_enabled,
+                "forwarding_families":{"new_dnat":["ipv4"],"new_transports":["tcp","udp"],"new_ipv6_pinhole":False,"nat66":False,"legacy_restore":"Selected exact dual-stack device allows; requires both-family proof"},
                 "diagnostic_grants_enabled":config.diagnostic_grants_enabled,
                 "confirmation_mode":config.write_confirmation_mode,
                 "approval_workflow":writes.approval_next_step() if config.writes_enabled else None,

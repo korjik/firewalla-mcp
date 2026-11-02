@@ -24,13 +24,21 @@ class ForwardManager:
     def binding(self,box):
         return digest({'write_binding':self.writes.site_binding(box),'recovery_directory':self.config.forwarding_recovery_directory,
                        'lifecycle_enabled':self.config.forwarding_lifecycle_enabled})
-    def adapter(self,box,spec,extra=()):
+    def adapter(self,box,spec,extra=(),adoptions=None):
         receipts=merge_receipts(load_receipts(self.config.forwarding_recovery_directory,box,self.binding(box))+list(extra))
         receipts=[r for r in receipts if all(r['anchor'].get(k)==spec[v] for k,v in [('toMac','device'),('toIP','destination_ip'),('wanUUID','interface_uuid')])]
         adapter=self.adapter_factory(self.config.sites[box].model_copy(deep=True),spec)
         if receipts:
             if isinstance(adapter,NativeForwardAdapter):adapter=ReceiptNativeAdapter(adapter.revision,spec,receipts)
             else:adapter.receipts=receipts
+        from .forward_app_adoption import load_adoptions,merge_adoptions
+        history=load_adoptions(self.config.forwarding_recovery_directory,box,self.binding(box))
+        combined=merge_adoptions([history]+([adoptions] if adoptions else []))
+        if combined['mappings'] or combined['policies']:
+            if isinstance(adapter,NativeForwardAdapter):
+                from .forward_app_adapter import AppForwardAdapter
+                adapter=AppForwardAdapter(adapter.revision,spec,receipts,combined)
+            else:adapter.adoptions=combined
         return adapter
     def template(self,box,device,destination,interface,maintenance_until):
         self.enabled();box=self.config.resolve(box)
@@ -75,8 +83,8 @@ class ForwardManager:
                         receipt.setdefault('successors',[]).append(value)
             if receipts:plan['metadata_receipts']=merge_receipts(receipts)
             return self.remember(plan,spec)
-    def transaction(self,box,template,receipts=()):
-        adapter=self.adapter(box,template,receipts)
+    def transaction(self,box,template,receipts=(),adoptions=None):
+        adapter=self.adapter(box,template,receipts,adoptions)
         def claim(plan):
             self.writes.consume_approval(plan)
             self.writes.audit(plan['plan_id'],'host_requested_forward_lifecycle',box)
@@ -85,9 +93,10 @@ class ForwardManager:
         self.enabled()
         if ident not in self.plans:raise ValueError('Unknown lifecycle plan; preview recovery after a restart')
         plan=copy.deepcopy(self.plans[ident]);box=plan['box']
+        if plan.get('app_adoptions') and not self.config.forwarding_app_management_enabled:raise ValueError('App forwarding management disabled')
         self.writes.validate(box,plan['template'])
         async with self.writes.locks[box]:
-            result=await self.transaction(box,plan['template'],plan.get('metadata_receipts',[])).execute(plan,self.binding(box))
+            result=await self.transaction(box,plan['template'],plan.get('metadata_receipts',[]),plan.get('app_adoptions')).execute(plan,self.binding(box))
             self.writes.audit(ident,result['outcome'],box)
             return result
     async def recover(self,ident,rollback,maintenance_until):
@@ -102,9 +111,10 @@ class ForwardManager:
         template['maintenance_until']=maintenance_until
         self.writes.validate(box,template)
         async with self.writes.locks[box]:
-            plan=await self.transaction(box,template,old.get('metadata_receipts',[])).recovery_preview(ident,self.binding(box),rollback=rollback)
+            plan=await self.transaction(box,template,old.get('metadata_receipts',[]),old.get('app_adoptions')).recovery_preview(ident,self.binding(box),rollback=rollback)
             if plan.get('status')=='no_change':return plan
             if old.get('metadata_receipts'):plan['metadata_receipts']=old['metadata_receipts']
+            if old.get('app_adoptions'):plan['app_adoptions']=old['app_adoptions']
             return self.remember(plan,template,old.get('disclosures',[]))
 
     async def preview_metadata(self,box,device,destination,interface,changes,maintenance_until):
@@ -136,3 +146,66 @@ class ForwardManager:
             if await checked.snapshot()!=initial or not await checked.verify(initial):raise ValueError('Metadata baseline or enforcement changed')
             plan=build_plan(box,self.binding(box),initial,steps);plan['metadata_receipts']=receipts
             return self.remember(plan,spec,disclosures)
+
+    async def inspect_app_objects(self,box,device,destination,interface,maintenance_until):
+        if not self.config.forwarding_app_management_enabled:raise ValueError('App forwarding management disabled')
+        box,spec=self.template(box,device,destination,interface,maintenance_until)
+        async with self.writes.locks[box]:
+            adapter=self.adapter(box,spec);state=await adapter.snapshot();policies=[]
+            from .forward_app_adoption import legacy_allow
+            for p in adapter.policies:
+                if p.get('action')!='allow' or p.get('direction')!='inbound':continue
+                try:
+                    try:value=legacy_allow(p);kind='legacy_dual_stack_allow'
+                    except ValueError:value=adapter.policy_value(p);kind='managed_ipv4_allow'
+                except (ValueError,TypeError,KeyError):continue
+                policies.append({'id':p['pid'],'birth':str(p['timestamp']),'fingerprint':p['full_fingerprint'],
+                    'kind':kind,'value':value,'enabled':p.get('disabled') not in ('1',1,True)})
+            return {'mappings':[{'key':k,'fingerprint':digest(r),**r} for k,r in state['objects'].items() if r['kind']=='mapping'],
+                'policy_candidates':policies,'all_policy_count':len(adapter.policies),'truncated':False,
+                'warning':'Candidates are not ownership or exclusive-association proof. Exact selection and complete dependency validation required. Legacy allows may cover IPv6 and non-DNAT traffic.'}
+
+    async def preview_app_reset(self,box,device,destination,interface,mapping_selections,policy_selections,actions,all_mappings,maintenance_until):
+        if not self.config.forwarding_app_management_enabled:raise ValueError('App forwarding management disabled')
+        box,spec=self.template(box,device,destination,interface,maintenance_until)
+        async with self.writes.locks[box]:
+            base=self.adapter(box,spec);before=await base.snapshot();maps=[r['value'] for r in before['objects'].values() if r['kind']=='mapping']
+            selected_maps=[];mapping_keys=[]
+            for sel in mapping_selections:
+                if set(sel)!={'key','fingerprint'} or sel['key'] in mapping_keys:raise ValueError('Exact unique mapping selection')
+                row=before['objects'].get(sel['key'])
+                if row is None or row['kind']!='mapping' or digest(row)!=sel['fingerprint']:raise ValueError('Mapping selection drift')
+                selected_maps.append(row['value']);mapping_keys.append(sel['key'])
+            raw=[];legacy=[];policy_ids=[]
+            from .forward_app_adoption import legacy_allow,select_app_objects
+            for sel in policy_selections:
+                if set(sel)!={'id','birth','fingerprint'} or sel['id'] in policy_ids:raise ValueError('Exact unique policy selection')
+                matches=[p for p in base.policies if p['pid']==sel['id']]
+                if len(matches)!=1:raise ValueError('Unknown policy selection')
+                p=matches[0]
+                if str(p.get('timestamp'))!=sel['birth'] or p.get('full_fingerprint')!=sel['fingerprint']:raise ValueError('Policy selection drift')
+                try:legacy_allow(p);legacy.append(p)
+                except ValueError:base.policy_value(p)
+                raw.append(p);policy_ids.append(p['pid'])
+            select_app_objects(maps,base.policies,[{'fingerprint':digest(m)} for m in selected_maps],
+                [s for s in policy_selections if s['id'] in {p['pid'] for p in legacy}])
+            adoptions={'mappings':selected_maps,'policies':legacy}
+            adapter=self.adapter(box,spec,adoptions=adoptions);initial=await adapter.snapshot()
+            policy_keys=[]
+            for pid in policy_ids:
+                matches=[k for k,r in initial['objects'].items() if r.get('instance',{}).get('id')==pid]
+                if len(matches)!=1:raise ValueError('Ambiguous logical policy selection')
+                policy_keys.append(matches[0])
+            # Recheck all projected raw policy fingerprints after building the
+            # target registry; do not approve a stale selector projection.
+            if {p['pid']:p for p in raw}!={p['pid']:p for p in adapter.policies if p['pid'] in policy_ids}:raise ValueError('Policy changed during preview')
+            for key in mapping_keys:
+                if initial['objects'].get(key)!=before['objects'][key]:raise ValueError('Mapping changed during preview')
+            from .forward_reset import reset_plan
+            plan=await reset_plan(adapter,box,self.binding(box),mapping_keys,policy_keys,actions,all_mappings=all_mappings)
+            plan['app_adoptions']=adoptions
+            # Validate the final metadata provenance against the same live
+            # baseline before exposing a confirmable plan.
+            checked=self.adapter(box,spec,plan.get('metadata_receipts',[]),adoptions)
+            if await checked.snapshot()!=initial:raise ValueError('Reset baseline changed')
+            return self.remember(plan,spec,plan['disclosures'])

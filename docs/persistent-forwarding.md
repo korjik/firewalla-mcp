@@ -263,3 +263,10 @@ follows the device's native address set rather than pinning the allow to just on
 internal IPv4 address; the NAT destination remains explicitly pinned. Existing
 policy precedence and network reachability still affect the outcome. No assertion
 about a particular device's IPv6 configuration follows from these source tests.
+
+## Explicit app-created object management
+
+The separately enabled [app-created forwarding workflow](app-created-forwarding.md)
+adds exact-object adoption, TCP/UDP reset plans and restart-safe conditional recovery.
+It does not add NAT66 or new IPv6 pinhole creation. Review its scope and validation
+limits before enabling it.

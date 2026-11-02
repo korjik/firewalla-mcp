@@ -45,8 +45,25 @@ vm.runInContext(names.map(extract).join('\n')+'\nthis.probe={prepareOutboundOpti
  assert.equal(scoped6.src.negate,false);
  assert(scopedRules.every(r=>r.proto==='tcp' && r.ctstate===null));
  assert.equal(scoped6.dst.portSet,'local443');
+ // IPv6 pinholes cannot use an IPv6 origDst through this dual-family builder:
+ // it is copied unchanged into IPv4 rules as well. Device-wide source-scoped
+ // IPv6 access is a different contract and must be explicitly disclosed.
+ for (const proto of ['tcp','udp']) {
+  const v6=await sandbox.probe.prepareOutboundOptions({pid:'125',remoteSet4:'source_v4_empty',remoteSet6:'source_v6',
+   proto,direction:'inbound',action:'allow',family:6,af:6,owanUUID:'synthetic_wan',origDst:'2001:db8::2',origDport:'443'});
+  v6.src={set:'device_v4',set6:'device_v6',specs:['src'],portSet:'local443'};
+  const generated=await sandbox.probe.generateRules(v6);
+  assert.equal(generated.length,4);
+  assert(generated.every(r=>r.origDst==='2001:db8::2' && r.proto===proto));
+  assert(generated.some(r=>r.af===4));
+  delete v6.origDst;
+  const deviceWide=await sandbox.probe.generateRules(v6);
+  assert(deviceWide.every(r=>!r.origDst));
+  assert.equal(deviceWide.find(r=>r.af===6&&r.ctDir==='ORIGINAL').src.set6,'source_v6');
+  assert.equal(deviceWide.find(r=>r.af===4&&r.ctDir==='ORIGINAL').src.set,'source_v4_empty');
+ }
  console.log(JSON.stringify({source_contract:'ordinary_inbound_allow',families:[4,6],family_option_honored:false,
   wan_and_source_match:'original_source',internal_device_port_match:'original_destination',
   original_destination_constraint_copied_to_both:true,
-  alternative_requires_explicit_scope_change:true,alternative_ipv6_source_set:"empty_by_policy_contract",router_or_kernel_actions:false}));
+  alternative_requires_explicit_scope_change:true,alternative_ipv6_source_set:"empty_by_policy_contract",ipv6_exact_destination_copied_into_ipv4:true,ipv6_device_wide_alternative_requires_explicit_scope:true,router_or_kernel_actions:false}));
 })().catch(e=>{console.error(e.message);process.exitCode=1;});

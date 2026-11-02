@@ -12,7 +12,7 @@ def test_exact_app_style_scope_no_hidden_broadening():
     assert scope['ipv6_allowed'] is False and scope['dnat_required'] is False
     assert scope['original_destination_ip_restricted'] is False
 
-@pytest.mark.parametrize('index,value',[(0,'x;id'),(1,'wan-a'),(2,'::/0'),(2,'192.0.2.1/24'),(3,'udp'),(4,True),(5,0),(6,'x')])
+@pytest.mark.parametrize('index,value',[(0,'x;id'),(1,'wan-a'),(2,'::/0'),(2,'192.0.2.1/24'),(3,'icmp'),(4,True),(5,0),(6,'x')])
 def test_invalid_arguments(index,value):
     args=list(ARGS);args[index]=value
     with pytest.raises(ValueError):native_allow(*args)
@@ -59,3 +59,7 @@ def test_matching_incomplete_identity_still_blocks_and_legacy_aliases_never_skip
         reject_duplicate([{**desired,'identity_complete':False}],desired)
     with pytest.raises(ValueError,match='legacy'):
         reject_duplicate([{**desired,'type':'category','identity_complete':False,'legacy_identity':True}],desired)
+
+def test_udp_native_allow_preserves_protocol():
+    args=list(ARGS);args[3]='udp'
+    assert native_allow(*args)['protocol']=='udp'

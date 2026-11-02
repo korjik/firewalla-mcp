@@ -34,7 +34,7 @@ def canonical_rule(line):
         else:
             if flag in out:raise ValueError('duplicate enforcement clause')
             out[flag]=values[0]
-    if not set(out['modules'])<={'tcp','set','conntrack','comment'}:raise ValueError('unexpected enforcement module')
+    if not set(out['modules'])<={'tcp','udp','set','conntrack','comment'}:raise ValueError('unexpected enforcement module')
     out.pop('modules');out['sets']=sorted(out['sets'])
     if '--set-xmark' in out:
         mark,mask=out['--set-xmark'].split('/')
@@ -65,7 +65,7 @@ def verify_policy(value,pid,rules4,rules6,sets,enabled):
         expected=[]
         for direction in ('ORIGINAL','REPLY'):
             remote_side,local_side=('src','dst') if direction=='ORIGINAL' else ('dst','src')
-            expected.append({'-A':'FW_FIREWALL_DEV_ALLOW_LO','-p':'tcp',
+            expected.append({'-A':'FW_FIREWALL_DEV_ALLOW_LO','-p':value['protocol'],
                 'sets':sorted([(source+('6' if family==6 else ''),remote_side),(wan,remote_side+','+remote_side),(device,local_side),(local,local_side)]),
                 '--ctorigdstport':value['origDport'],'--ctdir':direction,'--comment':'rule_'+pid,
                 '-j':'MARK','--set-xmark':(int(pid),65535)})

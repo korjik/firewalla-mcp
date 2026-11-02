@@ -10,9 +10,12 @@ async def handle(request):
     if not isinstance(request,dict) or set(request)!={'operation','revision','template','arguments'}:raise ValueError('request shape')
     operation=request['operation'];args=request['arguments']
     if not isinstance(args,dict):raise ValueError('arguments')
-    if 'receipts' in args:
+    args=dict(args);receipts=args.pop('receipts',[]);adoptions=args.pop('adoptions',None)
+    if adoptions:
+        from .forward_app_adapter import AppForwardAdapter
+        adapter=AppForwardAdapter(request['revision'],request['template'],receipts,adoptions)
+    elif receipts:
         from .forward_provenance import ReceiptNativeAdapter
-        args=dict(args);receipts=args.pop('receipts')
         adapter=ReceiptNativeAdapter(request['revision'],request['template'],receipts)
     else:adapter=NativeForwardAdapter(request['revision'],request['template'])
     if operation=='snapshot' and not args:return {'state':await adapter.snapshot(),'policies':adapter.policies}

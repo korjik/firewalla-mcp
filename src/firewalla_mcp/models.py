@@ -73,6 +73,7 @@ class Config(BaseModel):
     audit_file: str | None = None
     forwarding_recovery_directory: str | None = None
     forwarding_lifecycle_enabled: bool = False
+    forwarding_app_management_enabled: bool = False
     diagnostic_grants_enabled: bool = False
     diagnostic_grants_directory: str | None = None
     diagnostic_grants_deny_addresses: list[str] = []
@@ -95,6 +96,8 @@ class Config(BaseModel):
             raise ValueError("Diagnostic grants require general host-confirmed writes and persistent storage")
         for address in self.diagnostic_grants_deny_addresses:
             if str(ip_address(address))!=address:raise ValueError("Canonical diagnostic deny address required")
+        if self.forwarding_app_management_enabled and not self.forwarding_lifecycle_enabled:
+            raise ValueError("App forwarding management requires lifecycle opt-in")
         if self.forwarding_lifecycle_enabled and (not self.writes_enabled or not self.forwarding_recovery_directory):
             raise ValueError("Forwarding lifecycle requires general host-confirmed writes and persistent recovery storage")
         if (self.writes_enabled and self.write_confirmation_mode != "host_confirmed") or (self.vpn_writes_enabled and self.vpn_confirmation_mode != "host_confirmed"):
@@ -133,3 +136,19 @@ class LifecycleRemoval(BaseModel):
     model_config = ConfigDict(extra='forbid')
     key: Annotated[str,Field(pattern=r'^(mapping|policy):mcp:[a-f0-9]{32}$')]
     fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{64}$')]
+
+class AppMappingSelection(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    key: Annotated[str,Field(pattern=r'^mapping:(?:mcp:[a-f0-9]{32}|[a-f0-9]{64})$')]
+    fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{64}$')]
+
+class AppPolicySelection(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    id: Annotated[str,Field(pattern=r'^[0-9]{1,5}$')]
+    birth: str
+    fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{40}$')]
+
+class AppRecreateAction(LifecycleAction):
+    protocol: Literal['tcp','udp']
+    display_name: Annotated[str,Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$')]
+    address_family: Literal['ipv4']

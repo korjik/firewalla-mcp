@@ -94,9 +94,13 @@ def mapping_removal_dependencies(mapping, mappings):
     # Only the exact typed selector used by forward_value is supported. Never
     # emulate arbitrary wildcard deletion or coerce booleans/numeric selectors.
     required={'_type','active','description','dport','enabled','protocol','state','toIP','toMac','toPort','wanUUID'}
-    if set(mapping)-{'_type'}!=required-{'_type'} or mapping.get('_type','port_forward')!='port_forward' or mapping['protocol']!='tcp':raise ValueError('Exact native removal selector required')
+    if set(mapping)-{'_type','autoFirewall','ts'}!=required-{'_type'} or mapping.get('_type','port_forward')!='port_forward' or mapping['protocol'] not in ('tcp','udp'):raise ValueError('Exact native removal selector required')
     if not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}',mapping['wanUUID']):raise ValueError('Exact WAN required')
     if any(mapping[k] is not True for k in ('active','enabled','state')):raise ValueError('Active exact mapping required')
+    if 'autoFirewall' in mapping and (type(mapping['autoFirewall']) is not int or mapping['autoFirewall'] not in (0,1)):raise ValueError('Unknown automatic firewall metadata')
+    if 'ts' in mapping:
+        import math
+        if type(mapping['ts']) not in (int,float) or not math.isfinite(mapping['ts']) or mapping['ts']<0:raise ValueError('Invalid mapping timestamp')
     target=str(IPv4Address(mapping['toIP']))
     def port(v):
         if isinstance(v,bool) or not isinstance(v,(str,int)) or not re.fullmatch(r'[0-9]{1,5}',str(v)):raise ValueError('Exact port required')
@@ -116,7 +120,7 @@ def mapping_removal_dependencies(mapping, mappings):
             if protocol not in (None,'','tcp','udp'):raise ValueError('Protocol selector')
             kind=row.get('_type') or 'port_forward'
             if kind not in ('port_forward','dmz_host'):raise ValueError('Mapping kind')
-            if address!=target or protocol=='udp' or kind=='dmz_host':continue
+            if address!=target or protocol not in (None,'',mapping['protocol']) or kind=='dmz_host':continue
             # Same-address potentially relevant records must have bounded known
             # semantics. Auto-firewall/ts are metadata of preserved app mappings;
             # they never authorize policy deletion.
@@ -126,7 +130,7 @@ def mapping_removal_dependencies(mapping, mappings):
             overlap=any(lo<=internal<=hi for lo,hi in ranges)
             if row!=mapping and overlap:shared.append(ident)
             if (row.get('wanUUID')==mapping['wanUUID'] and row.get('applyToAll') is None and row.get('extIP') is None
-                    and protocol=='tcp' and port(row.get('dport'))==external and port(row.get('toPort'))==internal):
+                    and protocol==mapping['protocol'] and port(row.get('dport'))==external and port(row.get('toPort'))==internal):
                 matches.append(ident)
         except (ValueError,TypeError,KeyError):unresolved.append(ident)
     return {'complete':not unresolved,'native_match_count':len(matches),
@@ -163,7 +167,7 @@ def hairpin_evidence(run,mapping):
         if d.get('-A')!='FW_POSTROUTING_PORT_FORWARD' or d.get('-j')!='FW_POSTROUTING_HAIRPIN':raise ValueError('Unknown hairpin rule target')
         if d.get('-p') not in (None,'tcp','udp') or d.get('-m') not in (None,d.get('-p')):raise ValueError('Hairpin protocol')
         network=IPv4Network(d['-d'],strict=False)
-        if d.get('-p')=='udp' or not IPv4Network(wanted[1]).subnet_of(network):continue
+        if d.get('-p') not in (None,wanted[0]) or not IPv4Network(wanted[1]).subnet_of(network):continue
         ranges=ports(d.get('--dport'))
         if not any(lo<=wanted[2]<=hi for lo,hi in ranges):continue
         if d.get('-p')!=wanted[0] or str(network)!=wanted[1] or ranges!=[(wanted[2],wanted[2])]:raise ValueError('Overlapping ambiguous hairpin rule')

@@ -74,14 +74,16 @@ def bind_created_instance(before,projected,observed,step):
     return observed
 
 
-def build_plan(box,binding,initial,steps,*,recovery_of=None,now=None):
+def build_plan(box,binding,initial,steps,*,recovery_of=None,now=None,scope="native_forwarding_only"):
+    if scope not in ("native_forwarding_only","native_forwarding_reset"):raise ValueError("Plan scope")
+    bound=32 if scope=="native_forwarding_reset" else 16
     now=time.time() if now is None else now
-    if not isinstance(steps,list) or not 1<=len(steps)<=16:raise ValueError('One to sixteen bounded steps required')
+    if not isinstance(steps,list) or not 1<=len(steps)<=bound:raise ValueError('Bounded steps required')
     state=checked_state(initial)
     for step in steps:state=transition(state,step)
     plan={'plan_id':secrets.token_hex(16),'box':box,'binding':binding,'initial':copy.deepcopy(initial),
-          'steps':copy.deepcopy(steps),'expires_at':now+300,'recovery_of':recovery_of,
-          'atomic':False,'confirmation':'trusted_mcp_host','scope':'native_forwarding_only'}
+          'steps':copy.deepcopy(steps),'expires_at':now+(600 if scope=='native_forwarding_reset' else 300),'recovery_of':recovery_of,
+          'atomic':False,'confirmation':'trusted_mcp_host','scope':scope}
     plan['digest']=digest(plan)
     return plan
 
@@ -92,7 +94,8 @@ def verify_plan(plan,binding,now):
     if now>=plan['expires_at']:raise ValueError('Plan expired')
     if plan['confirmation']!='trusted_mcp_host':raise ValueError('Confirmation mode')
     state=checked_state(plan['initial'])
-    if not 1<=len(plan['steps'])<=16:raise ValueError('Step bound')
+    if plan['scope'] not in ('native_forwarding_only','native_forwarding_reset'):raise ValueError('Plan scope')
+    if not 1<=len(plan['steps'])<=(32 if plan['scope']=='native_forwarding_reset' else 16):raise ValueError('Step bound')
     for step in plan['steps']:state=transition(state,step)
 
 
@@ -242,7 +245,7 @@ class ForwardTransaction:
                             if step[field] is not None:step[field]={k:v for k,v in step[field].items() if k!='instance'}
             else:steps=original['steps'][n:]
             if not steps:return {'status':'no_change','transaction_id':ident,'completed':n}
-            plan=build_plan(original['box'],binding,current,steps,recovery_of=ident,now=self.clock())
+            plan=build_plan(original['box'],binding,current,steps,recovery_of=ident,now=self.clock(),scope=original['scope'])
             plan['removed_requirements']=removed
             plan['digest']=digest({k:v for k,v in plan.items() if k!='digest'})
             return plan

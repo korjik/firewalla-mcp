@@ -100,7 +100,7 @@ class NativeForwardAdapter:
                         sets[name]=remote.run(['sudo','-n','ipset','save',name])
                 rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
                 if not verify_policy(value,pid,*rules,sets,row['enabled']):return False
-        if not isinstance(removed,(list,tuple)) or len(removed)>16:raise ValueError('Removed proof bound')
+        if not isinstance(removed,(list,tuple)) or len(removed)>64:raise ValueError('Removed proof bound')
         for item in removed:
             if set(item)!={'key','before'}:raise ValueError('Removed proof identity')
             row=item['before']
