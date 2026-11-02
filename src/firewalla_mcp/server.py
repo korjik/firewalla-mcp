@@ -463,10 +463,10 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
                 "executable_write_tools_exposed":not readonly_catalog,
                 "live_writes_available":None if config.writes_enabled and not readonly_catalog else False,
                 "stage_tools":"Non-executable proposals only; never issue apply tokens",
-                "implemented_in_source_not_deployment_validation": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions", "persistent IPv4 VPN NAT single mapping or 2–4 ordered same-target mappings; current source pins, mock-tested only", "revision-pinned device/group/network tri-state controls, scheduled app/category blocks, DNS answer rules, device VPN switches and profile lifecycle"],
+                "implemented_in_source_not_deployment_validation": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions", "persistent IPv4 WAN-interface or VPN NAT single mapping or 2–4 ordered same-target mappings; current source pins, mock-tested only", "revision-pinned device/group/network tri-state controls, scheduled app/category blocks, DNS answer rules, device VPN switches and profile lifecycle"],
                 "approval": "Source write adapters require separate opt-in, version/scope checks and one-time approval; their presence does not establish live compatibility or availability",
                 "deployment_validation":"Read-only tools tested; no live write enforcement or rollback validation claimed",
-                "unsupported": ["persistent Firewalla routes; IPv6/general WAN/DMZ forwarding; arbitrary mixed/cross-plugin plans", "global policies, arbitrary existing rule updates, user time quotas", "profile import without its dedicated opt-in and registered input", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
+                "unsupported": ["persistent Firewalla routes; IPv6/DMZ forwarding, all-WAN wildcard creation and arbitrary LAN ingress; arbitrary mixed/cross-plugin plans", "global policies, arbitrary existing rule updates, user time quotas", "profile import without its dedicated opt-in and registered input", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
 
     @mcp.tool(annotations=READ)
     async def preview_scheduled_block_rule(box_name: BoxName,device: Mac,
@@ -566,6 +566,50 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         expiry and single use. SSH is internal. Stops on uncertainty; no blind resume.
         """
         return await workflows.apply_workflow(plan_id)
+
+    @mcp.tool(annotations=READ)
+    async def forwarding_interfaces(box_name: BoxName) -> dict[str, Any]:
+        """List current Firewalla network UUIDs, names, types and IPv4 subnets.
+        Select a WAN UUID for persistent interface forwarding. LAN entries identify
+        eligible destination networks. Bounded to 64 network records; no secrets.
+        """
+        return await read(box_name, "forward_interfaces")
+
+    @mcp.tool(annotations=READ)
+    async def preview_persistent_forward(box_name: BoxName, device: Mac, destination_ip: str,
+            interface_uuid: str, protocol: Literal["tcp","udp"], external_port: Port,
+            destination_port: Port, maintenance_until: int) -> dict[str, Any]:
+        """Preview a persistent IPv4 mapping for one current WAN network UUID.
+        Uses FireMain stored configuration, never temporary iptables-only changes.
+        Scope is the WAN destination-address set including hairpin, not physical
+        ingress-only filtering. Requires observed LAN device/IP binding, no conflict,
+        and a maintenance window with no concurrent mapping edits (up to ten minutes).
+        Does not add firewall allows, change routing or prove external reachability.
+        Show exact preview, obtain host confirmation, then call apply_change.
+        """
+        import secrets,time
+        if type(maintenance_until) is not int or not time.time()<maintenance_until<=time.time()+600:
+            raise ValueError("Explicit maintenance deadline within ten minutes required")
+        return await writes.preview(config.resolve(box_name),dict(kind="managed_interface_forward",
+            device=device.upper(),destination_ip=destination_ip,interface_uuid=interface_uuid,
+            protocol=protocol,external_port=external_port,destination_port=destination_port,
+            maintenance_until=maintenance_until,owner_token=secrets.token_hex(16)))
+
+    @mcp.tool(annotations=READ)
+    async def preview_interface_forward_plan(box_name: BoxName, device: Mac, destination_ip: str,
+            interface_uuid: str, actions: list[ForwardAction], maintenance_until: int) -> dict[str, Any]:
+        """Preview 2–4 ordered persistent mappings on the same WAN UUID/device.
+        One exact host confirmation covers the immutable batch; apply_change executes
+        internal SSH. Stops on uncertainty or unrelated drift. Not atomic; no automatic
+        rollback/resume. Same destination-address scope and limits as single forwarding.
+        """
+        import secrets,time
+        if not 2<=len(actions)<=4 or type(maintenance_until) is not int or not time.time()<maintenance_until<=time.time()+600:
+            raise ValueError("Bounded actions and maintenance window required")
+        steps=[dict(kind="managed_interface_forward",device=device.upper(),destination_ip=destination_ip,
+                    interface_uuid=interface_uuid,**action.model_dump(),maintenance_until=maintenance_until,
+                    owner_token=secrets.token_hex(16)) for action in actions]
+        return await writes.preview(config.resolve(box_name),dict(kind="managed_forward_batch",steps=steps))
 
     @mcp.tool(annotations=READ)
     async def preview_forward_plan(box_name: BoxName, device: Mac, destination_ip: str,
@@ -704,7 +748,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             return await writes.rollback_preview(plan_id)
 
     if readonly_catalog or vpn_write_catalog:
-        for name in ("preview_network_plan","apply_network_plan","preview_forward_plan","preview_persistent_vpn_forward","apply_change","preview_route_change","preview_firewall_rule","preview_port_forward","preview_rollback","preview_managed_device_control","preview_managed_block_rule","preview_managed_vpn_switch","preview_scheduled_block_rule","preview_dns_override","preview_scoped_service_control","preview_vpn_lifecycle"):
+        for name in ("preview_persistent_forward","preview_interface_forward_plan","preview_network_plan","apply_network_plan","preview_forward_plan","preview_persistent_vpn_forward","apply_change","preview_route_change","preview_firewall_rule","preview_port_forward","preview_rollback","preview_managed_device_control","preview_managed_block_rule","preview_managed_vpn_switch","preview_scheduled_block_rule","preview_dns_override","preview_scoped_service_control","preview_vpn_lifecycle"):
             if vpn_write_catalog and name in ("preview_vpn_lifecycle","preview_managed_vpn_switch"):
                 continue
             mcp.remove_tool(name)

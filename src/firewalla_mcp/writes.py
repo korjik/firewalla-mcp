@@ -65,7 +65,7 @@ class WriteManager:
         if kind.startswith("managed_"):
             from .remote import validate_managed, MANAGEMENT_REVISION, VPN_MANAGEMENT_REVISIONS, POLICY_FEATURES
             validate_managed(spec)
-            if site.management_revision != MANAGEMENT_REVISION and not (kind in ("managed_lifecycle","managed_vpn","managed_forward","managed_forward_batch","managed_feature","managed_rule","managed_scoped") and site.management_revision in VPN_MANAGEMENT_REVISIONS):
+            if site.management_revision != MANAGEMENT_REVISION and not (kind in ("managed_lifecycle","managed_vpn","managed_forward","managed_interface_forward","managed_forward_batch","managed_feature","managed_rule","managed_scoped") and site.management_revision in VPN_MANAGEMENT_REVISIONS):
                 raise ValueError("Explicit reviewed management revision required")
             if site.management_revision in VPN_MANAGEMENT_REVISIONS and kind in ("managed_feature","managed_scoped") and spec["feature"] not in POLICY_FEATURES:
                 raise ValueError("Feature implementation not reviewed for installed revision")
@@ -73,7 +73,7 @@ class WriteManager:
                 from .remote import managed_target
                 if not self.approval_bound_targets() and managed_target(spec) not in site.managed_scopes:raise ValueError("Scope outside managed allowlist")
                 return site
-            if kind in ("managed_forward","managed_forward_batch"):
+            if kind in ("managed_forward","managed_interface_forward","managed_forward_batch"):
                 if not self.host_confirmed():raise ValueError("Persistent forward requires explicit host-confirmed mode")
                 if site.management_revision not in VPN_MANAGEMENT_REVISIONS:raise ValueError("Persistent forward requires reviewed installed revision")
                 return site

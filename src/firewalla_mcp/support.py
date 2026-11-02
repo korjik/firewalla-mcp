@@ -10,6 +10,7 @@ def configured_contracts(config):
         result[name] = {
             'evidence': 'Configured revision only; each preview must verify installed source, SSH permissions and state',
             'vpn_lifecycle_and_device_switch': 'candidate' if old or vpn else 'blocked_revision',
+            'persistent_wan_interface_forwarding': 'candidate' if vpn else 'blocked_revision',
             'persistent_vpn_forwarding': 'candidate' if vpn else 'blocked_revision',
             'device_app_dns_scoped_controls': 'candidate_adblock_safeSearch_unbound_rules_dns' if vpn else 'legacy_contract_only' if old else 'blocked_revision',
             'doh_ntp_service_writes': 'legacy_contract_only' if old else 'blocked_revision',

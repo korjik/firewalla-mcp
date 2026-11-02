@@ -1,4 +1,4 @@
-# Persistent VPN forwarding and shared confirmation
+# Persistent forwarding and shared confirmation
 
 These source-supported adapters require the combined write catalog, compatible firmware and restricted router permissions. Live forwarding enforcement and restart persistence are not certified; see the [support matrix](features.md).
 
@@ -10,7 +10,7 @@ Both reviewed firmware trees contain the same port-forward implementation
 FireMain updates `extension.portforward.config` and restores maps during startup.
 The adapter sends the native management request; it does not SET Redis, install
 startup scripts, call side-effecting Node modules or write temporary iptables rules.
-The port-forward module and three supporting files are additionally pinned.
+The port-forward module and five supporting files are additionally pinned.
 
 `wanUUID=VC:<profile>` selects the VPN NAT chain and the profile's tunnel-address
 ipset. VPNClient supplies the interface-specific ingress jump. An ordinary inbound
@@ -37,9 +37,20 @@ prevent a competing writer in the queue interval.** Do not claim transaction iso
 Configuration retention across FireMain restart is supported by source review; no
 restart/reboot or Redis durable-storage recovery has been live-tested.
 
+## WAN/interface forwarding
+
+Use `forwarding_interfaces` to select an exact **current WAN network UUID**. Do not pass an interface name, guess a UUID, use `*`, or substitute a VPN profile ID. The adapter validates the UUID/name relationship against current network metadata, an observed LAN subnet for the destination, and the device's recorded IPv4. Stale UUIDs, empty self-address sets, colliding native set prefixes and overlapping network self-addresses fail closed. The metadata inventory is bounded to 64 entries in each hash; unusually large configurations are unsupported.
+
+Native `wanUUID=<network UUID>` selects `FW_PRERT_PORT_FORWARD` with the network's self-address set. This includes hairpin access to that WAN address. It does **not** implement physical ingress-only filtering. DNAT and the WAN address jump are checked separately after submission; missing evidence is uncertain. Unlike VPN forwarding, a matching device VPN assignment is not required. The device's stored VPN policy, current network/address sets and observed routing tables/rules are bound to the plan; inherited policies and effective return routing remain unverified. A destination using VPN or policy routing may need separate troubleshooting. This operation never changes routing to make forwarding work.
+
+Default/all-WAN, explicit matching-WAN, apply-to-all, DMZ and disabled/range mappings are checked conservatively for conflicts. Observed competing IPv4 DNAT (including UPnP) also blocks the plan; unknown multiport DNAT requires manual review. Dynamic mappings can still appear between checks. New wildcard/all-WAN maps, LAN-ingress maps, IPv6, DMZ and range creation are unsupported. Existing maps are preserved. Firewall acceptance, upstream NAT/CGNAT and provider restrictions may still prevent access.
+
 ## Tools and one confirmation
 
-In the general write catalog:
+`forwarding_interfaces` is available in the inspection catalog. In the general write catalog:
+
+- `preview_persistent_forward`: box, device MAC, expected destination IPv4, WAN network UUID, TCP/UDP, external/destination ports and maintenance deadline.
+- `preview_interface_forward_plan`: same WAN/device scope, with 2–4 ordered protocol/port actions.
 
 - `preview_persistent_vpn_forward`: box, device MAC, expected destination IPv4,
   profile ID, TCP/UDP, external/destination ports, maintenance deadline.
@@ -126,3 +137,18 @@ Combined catalog rollout: select `--allow-write-catalog` and enable the required
 `vpn_target_policy=approval_bound`. The 57-tool combined catalog preserves the
 existing 43 VPN-catalog tools; exact operation guards still determine availability.
 The network gate permits the documented VPN/forwarding operations. Device/app/DNS operations require the separate managed gate and compatible firmware contracts; kernel writers require their own restricted permissions. Tool registration alone grants none of these permissions.
+
+## Example: ordinary WAN port forwarding
+
+1. Call `forwarding_interfaces(box_name="router-a")` and select the intended WAN UUID. Resolve the intended device MAC and current LAN address using the device inventory.
+2. Call `preview_persistent_forward` with the resolved values, `protocol="tcp"`, `external_port=41000`, `destination_port=8080`, and an actual Unix `maintenance_until` deadline within the next ten minutes. Do not reuse a stale example timestamp.
+3. Show the complete preview and obtain explicit confirmation of both the mapping and no concurrent forwarding edits during the window. Call `apply_change(plan_id=...)` once.
+4. Inspect stored and kernel evidence. A verified mapping is not an external service test. Any active external probe requires its own authorized scope.
+
+For TCP+UDP, use `preview_interface_forward_plan` with two actions on the same UUID/device. Batches have a 110-second SSH deadline with a smaller internal subprocess budget so an interrupted step can return partial/uncertain results. The batch is not atomic. Stop and inspect partial results; never blindly replay or delete a mapping after an uncertain outcome. For a successful single mapping, `preview_rollback` creates a separate removal preview only while ownership and complete expected state still match.
+
+## Upgrade and rollback
+
+Build and test the new image without router credentials first. Preserve the prior image, configuration, helper/gate files and integration identity. The combined catalog requires explicitly enabled host-confirmed general writes, protected audit/consumption storage and an installed restricted network gate with the reviewed helper hash. Gate changes grant network-control access and require separate deployment authorization. Preserve existing VPN/import/capture permissions only when intended; do not use the broader managed-control gate merely to enable forwarding.
+
+After an authorized upgrade, refresh the existing gateway/client catalog, verify tool schemas, health and harmless previews. Do not apply a real forwarding plan as a deployment smoke test. Roll back the image, configuration and matching gate pins together if verification fails; keep the persistent consumption ledger and audit history. No OAuth recreation or SSH key rotation is necessary.

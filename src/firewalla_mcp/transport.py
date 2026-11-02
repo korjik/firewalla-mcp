@@ -9,7 +9,7 @@ MAX_OUTPUT = 131072
 
 def remote_command(operation: str, arguments: dict) -> str:
     source = Path(__file__).with_name("remote.py").read_text()
-    deadline = "110" if operation == "managed_write" and arguments.get("spec", {}).get("kind") == "managed_lifecycle" else "20"
+    deadline = "110" if operation == "managed_write" and arguments.get("spec", {}).get("kind") in ("managed_lifecycle", "managed_forward_batch") else "20"
     return shlex.join(["timeout", deadline, "python3", "-c", source,
                        json.dumps({"operation": operation, "arguments": arguments})])
 
@@ -51,7 +51,7 @@ class SSHTransport:
                     *ssh_argv(site, remote_command(operation, arguments)),
                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL)
-                deadline = 115 if operation == "managed_write" and arguments.get("spec", {}).get("kind") == "managed_lifecycle" else 25
+                deadline = 115 if operation == "managed_write" and arguments.get("spec", {}).get("kind") in ("managed_lifecycle", "managed_forward_batch") else 25
                 async with asyncio.timeout(deadline):
                     raw = await bounded_read(proc.stdout)
                     code = await proc.wait()

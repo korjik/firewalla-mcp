@@ -1,6 +1,6 @@
 # Feature support and evidence
 
-The [generated tool reference](tool-reference.md) is the complete schema catalog. Default read catalog36, VPN43, VPN+capture47, combined+capture61. Counts describe registration, not execution authorization or firmware compatibility.
+The [generated tool reference](tool-reference.md) is the complete schema catalog. Default read catalog37, VPN44, VPN+capture48, combined+capture64. Counts describe registration, not execution authorization or firmware compatibility.
 
 | Family | Implemented behavior | Evidence and limits |
 |---|---|---|
@@ -25,3 +25,9 @@ The [generated tool reference](tool-reference.md) is the complete schema catalog
 ## Approval migration
 
 File-based/operator execution and the external issuer have been removed. Existing configurations fail closed until explicitly migrated to host-confirmed mode. New managed-rule activation rechecks expiry after disabled creation and reports `partial_expired` without enabling or cleaning up after the deadline. See [migration and trust boundaries](approvals.md#migrating-from-file-based-approval). These are source changes, not a claim of live deployment.
+
+### WAN/interface forwarding
+
+`forwarding_interfaces` projects current network UUIDs, names, types and IPv4 subnets. `preview_persistent_forward` and `preview_interface_forward_plan` add persistent WAN mappings for an existing device MAC and expected LAN IPv4, using the same confirmed `apply_change` as VPN mappings. Single additions have conditional exact-state rollback; batches stop on partial/uncertain outcomes and do not automatically compensate.
+
+Source contract hashes were checked on Gold Plus and Gold SE; synthetic tests cover native request shape, conflicts, routing/interface drift and rollback. No live mapping, reboot, external reachability or persistence test is claimed. WAN scope matches destination addresses, including hairpin traffic, not an ingress-only ACL. See [forwarding](persistent-forwarding.md) for setup and limits.

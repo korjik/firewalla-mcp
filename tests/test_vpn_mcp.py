@@ -81,11 +81,11 @@ async def test_real_transaction_through_mcp(config,dispatcher):
 async def test_catalog_isolation(config):
     server=build_server(config,AsyncMock(),vpn_write_catalog=True)
     names={v.name for v in await server.list_tools()}
-    assert len(names)==43
+    assert len(names)==44
     assert {'preview_vpn_import','apply_vpn_import','verify_vpn_import','apply_vpn_change','preview_vpn_lifecycle','preview_managed_vpn_switch','preview_vpn_change_rollback'}<=names
     assert not names & {'apply_change','preview_route_change','preview_firewall_rule','preview_managed_device_control','preview_port_forward'}
     readonly=build_server(config.model_copy(update={'vpn_writes_enabled':False}),AsyncMock(),readonly_catalog=True)
-    assert len(await readonly.list_tools())==36
+    assert len(await readonly.list_tools())==37
     with pytest.raises(ValueError): build_server(config,readonly_catalog=True)
     with pytest.raises(ValueError): build_server(config.model_copy(update={'writes_enabled':True}),vpn_write_catalog=True)
 
@@ -160,7 +160,7 @@ async def test_real_vpn_stdio_catalog(config,tmp_path):
         async with ClientSession(read,write) as session:
             await session.initialize()
             tools={t.name:t for t in (await session.list_tools()).tools}
-            assert len(tools)==43 and 'apply_change' not in tools
+            assert len(tools)==44 and 'apply_change' not in tools
             assert tools['preview_vpn_import'].inputSchema['properties']['destination_mode']['enum']==['0600','0644']
             result=await session.call_tool('write_capabilities',{})
             assert result.structuredContent['catalog_mode']=='vpn_only'
@@ -214,7 +214,7 @@ def test_vpn_http_protocol_schema_and_unapproved_rejection(config,tmp_path):
         assert initialized.status_code==200
         headers['MCP-Protocol-Version']=initialized.json()['result']['protocolVersion']
         listed=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}}).json()['result']['tools']
-        assert len(listed)==43 and all(t.get('outputSchema',{}).get('type')=='object' for t in listed)
+        assert len(listed)==44 and all(t.get('outputSchema',{}).get('type')=='object' for t in listed)
         for name in ('apply_vpn_import','apply_vpn_change','apply_change'):
             called=client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':name,'arguments':{'plan_id':'missing'}}})
             assert called.json()['result']['isError']

@@ -58,11 +58,11 @@ def main():
             stdio(init)
             process.stdin.write(json.dumps({'jsonrpc':'2.0','method':'notifications/initialized'})+'\n');process.stdin.flush()
             names={t['name'] for t in stdio({'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}})['tools']}
-            assert len(names)==36 and not {'apply_change','apply_vpn_change','apply_vpn_import','start_capture','apply_network_plan'} & names
+            assert len(names)==37 and not {'apply_change','apply_vpn_change','apply_vpn_import','start_capture','apply_network_plan'} & names
             response=stdio({'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'list_boxes','arguments':{}}})
             assert not response.get('isError',False)
             assert empty_boxes(response)
-            print('Docker stdio initialize/list(36)/call(list_boxes): PASS',flush=True)
+            print('Docker stdio initialize/list(37)/call(list_boxes): PASS',flush=True)
         finally:
             process.stdin.close()
             try:process.wait(timeout=10)
@@ -102,12 +102,12 @@ def main():
             # Stateless HTTP does not require a session ID; send the initialized notification.
             command(*(curl+['--config',str(curl_config),'-H','Accept: application/json, text/event-stream','-H','Content-Type: application/json','-H','MCP-Protocol-Version: '+protocol,'--data-binary',json.dumps({'jsonrpc':'2.0','method':'notifications/initialized'}),base+'/mcp']))
             names={tool['name'] for tool in http({'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}},protocol)['tools']}
-            assert len(names)==36 and not {'apply_change','apply_vpn_change','apply_vpn_import','start_capture','apply_network_plan'} & names
+            assert len(names)==37 and not {'apply_change','apply_vpn_change','apply_vpn_import','start_capture','apply_network_plan'} & names
             result=http({'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'list_boxes','arguments':{}}},protocol)
             assert not result.get('isError',False) and empty_boxes(result)
             health=json.loads(command(*(curl+['--config',str(curl_config),base+'/healthz'])))
             assert health['status']=='ok'
-            print('curl Streamable HTTP initialize/list(36)/call(list_boxes), health, unauthenticated 401: PASS',flush=True)
+            print('curl Streamable HTTP initialize/list(37)/call(list_boxes), health, unauthenticated 401: PASS',flush=True)
             print('HTTP binding: '+address+' (temporary loopback only)',flush=True)
         finally:
             subprocess.run(docker+['rm','-f',name],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

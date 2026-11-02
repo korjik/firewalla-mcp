@@ -14,7 +14,7 @@ import sys
 READ_DIGEST = 'REPLACE_WITH_REVIEWED_REMOTE_SHA256'
 IMPORT_DIGEST = 'REPLACE_WITH_REVIEWED_IMPORT_SHA256'
 CAPTURE_DIGEST = 'REPLACE_WITH_REVIEWED_CAPTURE_SHA256'
-ALLOWED = frozenset('managed_workflow_state membership_snapshot saved_vpn_profiles service_features control_state app_catalog control_rules device_flows alarm_summaries policy_summaries flow_sample services inventory device_policy vpn_interfaces traffic alarm_count dns_config conntrack capabilities health network device vpn mappings firewall ipsets connections tcp dns'.split())
+ALLOWED = frozenset('forward_interfaces managed_workflow_state membership_snapshot saved_vpn_profiles service_features control_state app_catalog control_rules device_flows alarm_summaries policy_summaries flow_sample services inventory device_policy vpn_interfaces traffic alarm_count dns_config conntrack capabilities health network device vpn mappings firewall ipsets connections tcp dns'.split())
 
 
 def validated(command, read_digest=READ_DIGEST, import_digest=IMPORT_DIGEST, import_path=None, capture_digest=CAPTURE_DIGEST):
@@ -54,12 +54,12 @@ def validated(command, read_digest=READ_DIGEST, import_digest=IMPORT_DIGEST, imp
     if operation in ALLOWED:
         if parts[1]!='20':raise ValueError('read deadline')
     elif operation=='managed_write':
-        if not isinstance(args.get('spec'),dict) or args['spec'].get('kind') not in ('managed_vpn','managed_lifecycle','managed_forward','managed_forward_batch','managed_feature','managed_rule','managed_scoped'):
+        if not isinstance(args.get('spec'),dict) or args['spec'].get('kind') not in ('managed_vpn','managed_lifecycle','managed_forward','managed_interface_forward','managed_forward_batch','managed_feature','managed_rule','managed_scoped'):
             raise ValueError('outside reviewed managed capability')
         if args['spec']['kind'] in ('managed_feature','managed_scoped') and args['spec'].get('feature') not in ('adblock','safeSearch','unbound'):
             raise ValueError('unreviewed feature implementation')
         if args.get('mode') not in ('preview','apply','rollback'):raise ValueError('write mode')
-        expected='110' if args['spec']['kind']=='managed_lifecycle' else '20'
+        expected='110' if args['spec']['kind'] in ('managed_lifecycle','managed_forward_batch') else '20'
         if parts[1]!=expected:raise ValueError('VPN deadline')
     else:raise ValueError('operation denied')
     return parts,None
