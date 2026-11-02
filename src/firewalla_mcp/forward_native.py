@@ -43,6 +43,7 @@ class NativeForwardAdapter:
         return spec
 
     def policy_value(self,row):
+        if any(row.get(k) not in (None,'') for k in ('purpose','updatedTime')):raise ValueError('Unreviewed managed policy metadata')
         if 'identity_complete' in row and row['identity_complete'] is not True:raise ValueError('Incomplete policy identity')
         scope=row.get('scope')
         if isinstance(scope,str):scope=json.loads(scope)

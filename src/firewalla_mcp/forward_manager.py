@@ -151,18 +151,20 @@ class ForwardManager:
         if not self.config.forwarding_app_management_enabled:raise ValueError('App forwarding management disabled')
         box,spec=self.template(box,device,destination,interface,maintenance_until)
         async with self.writes.locks[box]:
-            adapter=self.adapter(box,spec);state=await adapter.snapshot();policies=[]
+            adapter=self.adapter(box,spec);state=await adapter.snapshot();policies=[];ineligible=[]
             from .forward_app_adoption import legacy_allow
             for p in adapter.policies:
                 if p.get('action')!='allow' or p.get('direction')!='inbound':continue
                 try:
                     try:value=legacy_allow(p);kind='legacy_dual_stack_allow'
                     except ValueError:value=adapter.policy_value(p);kind='managed_ipv4_allow'
-                except (ValueError,TypeError,KeyError):continue
+                except (ValueError,TypeError,KeyError):
+                    ineligible.append({'id':p['pid'],'reason':'Unreviewed policy identity or scope','unknown_fields':p.get('unknown_fields',[])})
+                    continue
                 policies.append({'id':p['pid'],'birth':str(p['timestamp']),'fingerprint':p['full_fingerprint'],
                     'kind':kind,'value':value,'enabled':p.get('disabled') not in ('1',1,True)})
             return {'mappings':[{'key':k,'fingerprint':digest(r),**r} for k,r in state['objects'].items() if r['kind']=='mapping'],
-                'policy_candidates':policies,'all_policy_count':len(adapter.policies),'truncated':False,
+                'policy_candidates':policies,'ineligible_policy_candidates':ineligible,'all_policy_count':len(adapter.policies),'truncated':False,
                 'warning':'Candidates are not ownership or exclusive-association proof. Exact selection and complete dependency validation required. Legacy allows may cover IPv6 and non-DNAT traffic.'}
 
     async def preview_app_reset(self,box,device,destination,interface,mapping_selections,policy_selections,actions,all_mappings,maintenance_until):

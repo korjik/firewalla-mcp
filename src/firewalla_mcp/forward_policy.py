@@ -11,7 +11,7 @@ IDENTITY_FIELDS=('type','target','expire','cronTime','remotePort','localPort','p
  'upnp','dnsmasq_only','trust','trafficDirection','transferredBytes','transferredPackets','avgPacketBytes',
  'parentRgId','targetRgId','ipttl','wanUUID','owanUUID','seq','routeType','resolver','ipOnly','origDst','origDport',
  'snatIP','flowIsolation','dscpClass','appTimeUsage','useBf','affectedPids','scope','tag','targets','guids')
-PROJECTION_FIELDS=IDENTITY_FIELDS+('disabled','description','timestamp','activatedTime','lastActivatedTime','idleTs','duration','pid')
+PROJECTION_FIELDS=IDENTITY_FIELDS+('disabled','description','timestamp','activatedTime','lastActivatedTime','idleTs','duration','pid','purpose','updatedTime')
 
 
 def native_allow(device,interface_uuid,source_network,protocol,external_port,internal_port,owner):
@@ -89,13 +89,14 @@ for _,id in ipairs(ids) do
  local key='policy:'..id;local names=redis.call('HKEYS',key)
  if #names==0 or #names>96 then error('policy schema bound') end
  local row={pid=id};local known={};for _,f in ipairs(fields) do known[f]=true end
- local complete=true
+ local complete=true;local unknown={}
  for _,f in ipairs(names) do
   local n=redis.call('HSTRLEN',key,f);bytes=bytes+n
   if n>8192 or bytes>90000 then error('policy byte bound') end
-  if not known[f] and not observational[f] then complete=false end
+  if not known[f] and not observational[f] then complete=false; if #f<=96 and string.match(f,'^[%w_%.:%-]+$') then table.insert(unknown,f) else table.insert(unknown,'unrecognized_field') end end
  end
  for _,f in ipairs(fields) do local v=redis.call('HGET',key,f); if v then row[f]=v end end
+ table.sort(unknown);row.unknown_fields=unknown
  row.pid=id;row.identity_complete=complete
  row.legacy_identity=redis.call('HEXISTS',key,'i.type')==1 or redis.call('HEXISTS',key,'i.target')==1
  -- Bind every original field without returning unselected values. Sorting keys
@@ -115,7 +116,11 @@ def read_projection(run):
     if not isinstance(rows,list) or len(rows)>512:raise ValueError('Projection bound')
     seen=set()
     for row in rows:
-        if not isinstance(row,dict) or set(row)-set(PROJECTION_FIELDS)-{'identity_complete','full_fingerprint','legacy_identity'}:raise ValueError('Projection fields')
+        if not isinstance(row,dict) or set(row)-set(PROJECTION_FIELDS)-{'identity_complete','full_fingerprint','legacy_identity','unknown_fields'}:raise ValueError('Projection fields')
+        unknown=row.get('unknown_fields',[])
+        if unknown=={}:unknown=[]
+        if not isinstance(unknown,list) or len(unknown)>96 or any(not isinstance(f,str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,96}',f) for f in unknown):raise ValueError('Unknown field metadata bound')
+        if 'unknown_fields' in row:row['unknown_fields']=unknown
         pid=row.get('pid')
         if not isinstance(pid,str) or not re.fullmatch('[0-9]{1,20}',pid) or pid in seen:raise ValueError('Projection identity')
         seen.add(pid)

@@ -20,7 +20,7 @@ def reset_fixture(metadata,monkeypatch):
    m={**s['maps'][0],'toMac':'02:00:00:00:00:02','toIP':'192.0.2.22','protocol':proto,'dport':str(port),'toPort':str(port),'description':f'Game {proto} {port}','autoFirewall':1,'ts':1700000000}
    s['maps'].append(m)
    pid=str(90+len(s['policies']))
-   s['policies'].append({'pid':pid,'timestamp':'1700000001','full_fingerprint':pid.zfill(40),'identity_complete':True,'type':'mac','target':'TAG','action':'allow','direction':'inbound','scope':[m['toMac']],'protocol':proto,'localPort':str(port)})
+   s['policies'].append({'pid':pid,'timestamp':'1700000001','full_fingerprint':pid.zfill(40),'identity_complete':True,'purpose':'port_forwarding','updatedTime':'1700000002.1234567','type':'mac','target':'TAG','action':'allow','direction':'inbound','scope':[m['toMac']],'protocol':proto,'localPort':str(port)})
  for port,token in [(80,'c'),(443,'d')]:
   v=native_allow(spec['device'],spec['interface_uuid'],'0.0.0.0/0','tcp',port,port,token*32)
   s['policies'].append({**v,'pid':str(port),'timestamp':'1700000002','full_fingerprint':token*40,'identity_complete':True})

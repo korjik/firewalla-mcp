@@ -63,3 +63,15 @@ def test_matching_incomplete_identity_still_blocks_and_legacy_aliases_never_skip
 def test_udp_native_allow_preserves_protocol():
     args=list(ARGS);args[3]='udp'
     assert native_allow(*args)['protocol']=='udp'
+
+@pytest.mark.parametrize('value',[['method'],{},[]])
+def test_unknown_field_names_are_bounded_projection_metadata(value):
+ row={'pid':'1','identity_complete':False,'full_fingerprint':'a'*40,'unknown_fields':value}
+ result=read_projection(lambda args:json.dumps([row]))
+ assert result[0]['unknown_fields']==([] if value=={} else value)
+ assert result[0]['identity_complete'] is False
+
+@pytest.mark.parametrize('value',[['bad\nname'],['x'*97],['ok']*97,'method'])
+def test_unknown_field_metadata_rejects_unbounded_input(value):
+ row={'pid':'1','identity_complete':False,'full_fingerprint':'a'*40,'unknown_fields':value}
+ with pytest.raises(ValueError):read_projection(lambda args:json.dumps([row]))

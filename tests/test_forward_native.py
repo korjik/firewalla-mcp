@@ -95,3 +95,11 @@ async def test_recovery_absence_proof_checks_orphan_kernel_policy(native_fixture
     state=await adapter.snapshot()
     monkeypatch.setattr(native,'verify_policy',lambda *args:False)
     assert not await adapter.verify(state,removed=[{'key':'policy:'+value['description'],'before':before}])
+
+@pytest.mark.parametrize('metadata',[{'purpose':'port_forwarding'},{'purpose':'dmz'},{'updatedTime':'1700000001.1'}])
+def test_managed_adapter_does_not_drop_new_app_metadata(metadata):
+ from firewalla_mcp.forward_native import NativeForwardAdapter
+ from firewalla_mcp.forward_policy import native_allow
+ value=native_allow('02:00:00:00:00:01','11111111-1111-1111-1111-111111111111','0.0.0.0/0','tcp',443,443,'a'*32)
+ adapter=object.__new__(NativeForwardAdapter);adapter.template={'device':value['scope'][0],'interface_uuid':value['owanUUID']}
+ with pytest.raises(ValueError,match='metadata'):adapter.policy_value({**value,**metadata})

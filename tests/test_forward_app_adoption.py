@@ -66,3 +66,12 @@ def test_scalar_selector_not_erased_as_boolean_or_array(field,value):
 def test_unknown_birth_and_state_fail_closed(change):
  m,p,ms,ps=fixture();p.update(change)
  with pytest.raises(ValueError):legacy_allow(p)
+
+def test_native_port_forward_metadata_preserved():
+ m,p,ms,ps=fixture();p.update(purpose='port_forwarding',updatedTime='1700000002.1234567')
+ v=legacy_allow(p);assert v['purpose']=='port_forwarding' and v['updatedTime']==p['updatedTime']
+
+@pytest.mark.parametrize('change',[{'purpose':'dmz'},{'purpose':'vpn_client'},{'updatedTime':'nan'},{'updatedTime':True}])
+def test_unknown_purpose_or_update_metadata_rejected(change):
+ m,p,ms,ps=fixture();p.update(change)
+ with pytest.raises(ValueError):legacy_allow(p)

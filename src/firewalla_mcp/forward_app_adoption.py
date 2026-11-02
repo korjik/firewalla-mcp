@@ -18,13 +18,14 @@ def legacy_allow(row):
         raise ValueError('Exact policy ID required')
     if not re.fullmatch(r'[a-f0-9]{40}',row.get('full_fingerprint','')) or not row.get('timestamp'):
         raise ValueError('Policy fingerprint and birth required')
+    if row.get('unknown_fields'):raise ValueError('Unreviewed policy fields')
     birth=row.get('timestamp')
     if type(birth) not in (str,int,float) or not re.fullmatch(r'[0-9]{1,16}(?:\.[0-9]{1,9})?',str(birth)) or float(birth)<=0:
         raise ValueError('Numeric policy birth required')
     disabled=row.get('disabled')
     if not (disabled is None or type(disabled) is bool or type(disabled) is int and disabled in (0,1) or type(disabled) is str and disabled in ('','0','1')):
         raise ValueError('Unknown policy disabled state')
-    if set(row)-set(PROJECTION_FIELDS)-{'identity_complete','full_fingerprint','legacy_identity'}:
+    if set(row)-set(PROJECTION_FIELDS)-{'identity_complete','full_fingerprint','legacy_identity','unknown_fields'}:
         raise ValueError('Unknown policy projection')
     scope=array(row.get('scope'))
     if len(scope)!=1 or not re.fullmatch(r'(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}',scope[0]):
@@ -51,6 +52,13 @@ def legacy_allow(row):
     if row.get('description') not in (None,''):
         if not isinstance(row['description'],str) or len(row['description'])>256:raise ValueError('Description bound')
         value['description']=row['description']
+    if row.get('purpose') not in (None,''):
+        if row['purpose']!='port_forwarding':raise ValueError('Unreviewed policy purpose')
+        value['purpose']=row['purpose']
+    if row.get('updatedTime') not in (None,''):
+        updated=row['updatedTime']
+        if type(updated) not in (str,int,float) or not re.fullmatch(r'[0-9]{1,16}(?:\.[0-9]{1,9})?',str(updated)) or float(updated)<=0:raise ValueError('Policy update metadata')
+        value['updatedTime']=updated
     return value
 
 
