@@ -856,6 +856,7 @@ def forward_networks():
         if current.get("uuid")!=uuid:continue  # stale UUID entries are not selectable
         if current.get("type") not in ("wan","lan"):continue
         subnets=current.get("ip4_subnets",[])
+        if subnets is None:subnets=[]
         if not isinstance(subnets,list) or len(subnets)>32:raise Unsupported("network subnet bound")
         rows.append({"uuid":uuid,"interface":name,"type":current["type"],
                      "subnets":[str(ipaddress.IPv4Network(v,strict=False)) for v in subnets]})

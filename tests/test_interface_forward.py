@@ -192,3 +192,9 @@ def test_known_disjoint_destination_set_avoids_false_conflict(monkeypatch):
     assert remote.interface_nat_guard(wan_spec(),False)[0]
     assert not remote.interface_nat_guard(wan_spec(),False,{selected:['198.51.100.2'],other:['203.0.113.2']})[0]
     assert remote.interface_nat_guard(wan_spec(),False,{selected:['198.51.100.2'],other:['198.51.100.2']})[0]
+
+
+def test_unaddressed_network_null_subnets_remains_discoverable(network):
+    network['rows'][WAN]['ip4_subnets']=None
+    rows=remote.forward_networks()
+    assert next(r for r in rows if r['uuid']==WAN)['subnets']==[]
