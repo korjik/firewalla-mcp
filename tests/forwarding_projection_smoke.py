@@ -39,10 +39,22 @@ with tempfile.TemporaryDirectory() as d:
             commands.append(resp(['ZADD','policy_active',i,pid]))
             commands.append(resp(['HSET','policy:'+pid,'type','dns','target',f'host{i}.example.org','action','block','direction','outbound',
                                   'scope','["02:00:00:00:00:01"]','timestamp','1700000000','disabled','0','trust','false',
+                                  'dnsmasq_only','false','ipOnly','false','flowIsolation','false','useBf','false','upnp','false','seq','3',
                                   'lastHitFlow','PRIVATE_SYNTHETIC_SENTINEL','hitCount','42']))
         subprocess.run(['redis-cli','-s',socket,'--pipe'],input=b''.join(commands),capture_output=True,check=True,timeout=10)
         rows=read_projection(run)
         assert len(rows)==398 and all(r['identity_complete'] for r in rows)
+        # A verbose projection exceeds the subprocess cap; the sparse atomic
+        # wire representation fits without relaxing that cap or losing fields.
+        expanded_bytes=len(json.dumps(rows,separators=(',',':')).encode())
+        assert expanded_bytes>131072
+        script,fields=projection_script()
+        wire=run(['redis-cli','--raw','EVAL',script,'0',fields])
+        assert len(wire.encode())<=131072 and json.loads(wire)['version']==1
+        assert all(r['seq']=='3' and r['flowIsolation']=='false' for r in rows)
+        objects={'policy:'+r['pid']:{'kind':'allow_policy','enabled':True,'value':{'policy_fingerprint':r['full_fingerprint']},
+                 'instance':{'id':r['pid'],'birth':r['timestamp']}} for r in rows}
+        assert len(json.dumps({'status':'ok','data':{'state':{'objects':objects},'policies':rows}}).encode())<524288
         assert 'PRIVATE_SYNTHETIC_SENTINEL' not in json.dumps(rows)
         prior=rows[0]['full_fingerprint']
         run(['redis-cli','HSET','policy:1','hitCount','99'])
@@ -89,6 +101,13 @@ with tempfile.TemporaryDirectory() as d:
         assert len(read_projection(run))==11
         run(['redis-cli','HSET','policy:11','unknown_semantics','x'*8081])
         rejected('policy byte bound')
+        # JSON escaping can exceed the wire cap even while source values fit.
+        # Such inventories still fail closed with an explicit bounded response.
+        reset(['\x01'*8192]*10+['\x01'*8080])
+        write([['HSET','policy:'+str(i),'target','\x01'*8192] for i in range(1,11)])
+        # Remove the unknown fields so the configured-value sum remains 90k.
+        write([['HDEL','policy:'+str(i),'unknown_semantics'] for i in range(1,11)])
+        rejected('policy projection output bound')
         reset(['x']*512)
         assert len(read_projection(run))==512
         write([['ZADD','policy_active',513,'513'],['HSET','policy:513','type','dns']])
@@ -100,6 +119,6 @@ with tempfile.TemporaryDirectory() as d:
         rejected('policy schema bound')
         run(['redis-cli','DEL','policy:1'])
         rejected('policy schema bound')
-        print('PASS: omitted statistics cannot exhaust identity bytes; exact value, aggregate, inventory and schema boundaries remain enforced')
+        print(f'PASS: 398-policy wire {len(wire.encode())} bytes; expanded {expanded_bytes} bytes; compact atomic projection and all bounds verified')
     finally:
         process.terminate();process.wait(timeout=5)
