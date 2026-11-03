@@ -71,6 +71,13 @@ class Config(BaseModel):
     vpn_target_policy: Literal["allowlist", "approval_bound"] = "allowlist"
     approval_consumed_directory: str | None = None
     audit_file: str | None = None
+    forwarding_recovery_directory: str | None = None
+    forwarding_lifecycle_enabled: bool = False
+    forwarding_app_management_enabled: bool = False
+    ipv6_policy_enabled: bool = False
+    diagnostic_grants_enabled: bool = False
+    diagnostic_grants_directory: str | None = None
+    diagnostic_grants_deny_addresses: list[str] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -86,6 +93,16 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def explicit_host_mode(self):
+        if self.diagnostic_grants_enabled and (not self.writes_enabled or not self.diagnostic_grants_directory):
+            raise ValueError("Diagnostic grants require general host-confirmed writes and persistent storage")
+        for address in self.diagnostic_grants_deny_addresses:
+            if str(ip_address(address))!=address:raise ValueError("Canonical diagnostic deny address required")
+        if self.ipv6_policy_enabled and (not self.writes_enabled or not self.forwarding_recovery_directory):
+            raise ValueError("IPv6 policies require general host-confirmed writes and persistent recovery storage")
+        if self.forwarding_app_management_enabled and not self.forwarding_lifecycle_enabled:
+            raise ValueError("App forwarding management requires lifecycle opt-in")
+        if self.forwarding_lifecycle_enabled and (not self.writes_enabled or not self.forwarding_recovery_directory):
+            raise ValueError("Forwarding lifecycle requires general host-confirmed writes and persistent recovery storage")
         if (self.writes_enabled and self.write_confirmation_mode != "host_confirmed") or (self.vpn_writes_enabled and self.vpn_confirmation_mode != "host_confirmed"):
             raise ValueError("Writes require explicit host_confirmed migration; no automatic trust-model switch")
         return self
@@ -96,3 +113,64 @@ class Config(BaseModel):
         if not any(ip_address(address) in ip_network(n) for n in self.sites[site].probe_networks):
             raise ValueError("target is outside configured probe networks")
         return address
+
+class LifecycleAction(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    protocol: Literal['tcp']
+    external_port: Port
+    destination_port: Port
+    source_network: str
+
+    @field_validator('source_network')
+    @classmethod
+    def explicit_ipv4_source(cls,value):
+        from ipaddress import IPv4Network
+        return str(IPv4Network(value,strict=True))
+
+class ForwardMetadataChange(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    key: str
+    fingerprint: str
+    display_name: str
+    remove_default_type: bool = Field(strict=True)
+
+
+class LifecycleRemoval(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    key: Annotated[str,Field(pattern=r'^(mapping|policy):mcp:[a-f0-9]{32}$')]
+    fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{64}$')]
+
+class AppMappingSelection(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    key: Annotated[str,Field(pattern=r'^mapping:(?:mcp:[a-f0-9]{32}|[a-f0-9]{64})$')]
+    fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{64}$')]
+
+class AppPolicySelection(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    id: Annotated[str,Field(pattern=r'^[0-9]{1,5}$')]
+    birth: str
+    fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{40}$')]
+
+class AppRecreateAction(LifecycleAction):
+    protocol: Literal['tcp','udp']
+    display_name: Annotated[str,Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$')]
+    address_family: Literal['ipv4']
+
+
+class IPv6PolicyAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_network: str = Field(min_length=4,max_length=43)
+    protocol: Literal["tcp","udp"]
+    port: Port
+
+    @field_validator('source_network')
+    @classmethod
+    def canonical_ipv6_source(cls,value):
+        from ipaddress import IPv6Network
+        if '%' in value or '/' not in value:raise ValueError('Explicit unscoped IPv6 CIDR required')
+        return str(IPv6Network(value,strict=True))
+
+class IPv6PolicyRemoval(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(pattern=r'^policy:ipv6:[a-f0-9]{32}$')
+    fingerprint: str = Field(pattern=r'^[a-f0-9]{64}$')

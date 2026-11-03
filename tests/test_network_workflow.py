@@ -82,5 +82,5 @@ async def test_expanded_catalog_preserves_existing_vpn_tools(manager):
  combined={t.name for t in await build_server(c,transport=r).list_tools()}
  vpn_config=c.model_copy(update={'writes_enabled':False})
  old={t.name for t in await build_server(vpn_config,transport=r,vpn_write_catalog=True).list_tools()}
- assert old<=combined and len(combined)==57
+ assert old<=combined and len(combined)==60
  assert {'preview_network_plan','apply_network_plan','preview_forward_plan','preview_persistent_vpn_forward'}<=combined

@@ -1,7 +1,7 @@
 # VPN-only MCP writes
 
 The optional VPN catalog retains the same MCP endpoint and gateway identity. It
-contains 36 read tools plus seven VPN methods. It does not expose general route,
+contains 37 read tools plus seven VPN methods. It does not expose general route,
 firewall, device-control or service writes. Default stdio and HTTP remain read-only.
 The combined candidate catalog is a separate security review, not a prerequisite.
 

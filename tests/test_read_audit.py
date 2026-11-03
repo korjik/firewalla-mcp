@@ -15,7 +15,7 @@ def unpack(result):
 async def test_read_catalog_capability_consistency(config):
     server=build_server(config,AsyncMock(),readonly_catalog=True)
     catalog=await server.list_tools()
-    assert len(catalog)==36
+    assert len(catalog)==37
     assert all(t.annotations.readOnlyHint for t in catalog)
     assert not any(t.name.startswith('preview_') or t.name=='apply_change' for t in catalog)
     data=unpack(await server.call_tool('write_capabilities',{}))

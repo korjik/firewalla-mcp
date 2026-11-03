@@ -22,6 +22,8 @@ Target/settings changes require a new preview and confirmation. The host-confirm
 | Group/network feature override | `preview_scoped_service_control` | `apply_change`; explicit scope and tri-state setting; only features allowed by the verified firmware contract |
 | Existing VPN start/stop or device VPN switch | `preview_vpn_lifecycle`, `preview_managed_vpn_switch` | `apply_vpn_change` in the VPN catalog; the combined catalog also exposes `apply_change`. Confirm exact profile/device and preserved safety/DNS behavior |
 | New inactive OpenVPN profiles | `preview_vpn_import` | `apply_vpn_import` after confirmation of returned IDs, registered source/archive, permissions and maintenance deadline; special preview side effects below |
+| One persistent WAN mapping | `preview_persistent_forward` | `apply_change`; exact WAN UUID, device/IP, ports and maintenance window |
+| WAN mapping batch | `preview_interface_forward_plan` | `apply_change`; one confirmation for 2–4 ordered actions, stop on partial failure |
 | One persistent VPN mapping | `preview_persistent_vpn_forward` | `apply_change` after confirmation; mapping scope and maintenance deadline are bound |
 | 2–4 same-target persistent mappings | `preview_forward_plan` | `apply_change`; one approval binds all listed mappings, not arbitrary later additions |
 | VPN start → device switch → 1–2 forwards | `preview_network_plan` | `apply_network_plan`; one approval for the ordered plan, with expected transitions and stop-on-failure behavior |

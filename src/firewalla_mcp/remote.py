@@ -14,6 +14,7 @@ import sys
 import time
 
 LIMIT = 131072
+COMMAND_DEADLINE = None
 
 class Unsupported(Exception):
     pass
@@ -21,6 +22,9 @@ class Unsupported(Exception):
 
 def run(argv, seconds=5):
     """Bound time AND bytes while reading; discard stderr and never return it."""
+    if COMMAND_DEADLINE is not None:
+        seconds=min(seconds,COMMAND_DEADLINE-time.monotonic())
+        if seconds<=0:raise Unsupported("operation time budget exhausted")
     try:
         p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     except OSError:
@@ -392,94 +396,94 @@ def rule_list(value):
 def rule_page(args):
     import hashlib
     started=time.monotonic()
-    limit=args.get('limit',5); cursor=args.get('cursor','0')
-    enabled=args.get('enabled'); action=args.get('action'); device=args.get('device'); category=args.get('category')
+    limit=args.get("limit",5); cursor=args.get("cursor","0")
+    enabled=args.get("enabled"); action=args.get("action"); device=args.get("device"); category=args.get("category")
     if type(limit) is not int or not 1<=limit<=50 or enabled is not None and type(enabled) is not bool:
-        raise ValueError('rule page')
-    if action not in (None,'allow','block','route','match','alarm','qos','snat'):
-        raise ValueError('action filter')
+        raise ValueError("rule page")
+    if action not in (None,"allow","block","route","match","alarm","qos","snat"):
+        raise ValueError("action filter")
     if device is not None:
         if not isinstance(device,str) or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',device):
-            raise ValueError('device filter must be MAC')
+            raise ValueError("device filter must be MAC")
         device=device.upper()
     if category is not None and (not isinstance(category,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}',category)):
-        raise ValueError('category filter')
-    signature=hashlib.sha256(json.dumps([enabled,action,device,category],separators=(',',':')).encode()).hexdigest()[:16]
+        raise ValueError("category filter")
+    signature=hashlib.sha256(json.dumps([enabled,action,device,category],separators=(",",":")).encode()).hexdigest()[:16]
     offset=0; version=None
-    if cursor!='0':
+    if cursor!="0":
         if not isinstance(cursor,str) or not re.fullmatch(r'[0-9]{1,4}:[a-f0-9]{40}:[a-f0-9]{16}',cursor):
-            raise ValueError('cursor')
-        pos,version,bound=cursor.split(':');offset=int(pos)
+            raise ValueError("cursor")
+        pos,version,bound=cursor.split(":");offset=int(pos)
         if offset>2000 or bound!=signature:
-            raise ValueError('cursor filter mismatch')
-    raw=json.loads(run(['redis-cli','--raw','EVAL',RULE_PAGE_LUA,'0',str(offset),str(limit),json.dumps(RULE_FIELDS)]))
-    if not isinstance(raw,dict) or not all(k in raw for k in ('total','version','rows')):
-        raise Unsupported('rule index exceeds bound or selected-field schema unavailable')
-    if version and version!=raw['version']:
-        return {'records':[],'total':raw['total'],'total_semantics':'unfiltered_index_count','has_more':True,
-                'cursor':None,'next_cursor':None,'restart_required':True,'reason':'Rule index changed; restart at cursor 0'}
-    rows=raw['rows'] or []
+            raise ValueError("cursor filter mismatch")
+    raw=json.loads(run(["redis-cli","--raw","EVAL",RULE_PAGE_LUA,"0",str(offset),str(limit),json.dumps(RULE_FIELDS)]))
+    if not isinstance(raw,dict) or not all(k in raw for k in ("total","version","rows")):
+        raise Unsupported("rule index exceeds bound or selected-field schema unavailable")
+    if version and version!=raw["version"]:
+        return {"records":[],"total":raw["total"],"total_semantics":"unfiltered_index_count","has_more":True,
+                "cursor":None,"next_cursor":None,"restart_required":True,"reason":"Rule index changed; restart at cursor 0"}
+    rows=raw["rows"] or []
     if not isinstance(rows,list) or len(rows)>limit:
-        raise Unsupported('rule page schema')
+        raise Unsupported("rule page schema")
     projected=[]; name_keys=set(); missing=0
     for entry in rows:
-        p=entry['values']
-        if not p.get('type'):
+        p=entry["values"]
+        if not p.get("type"):
             missing+=1;continue
-        disabled=p.get('disabled')
-        if disabled in (False,None,'','0','false'):
-            state='enabled'; disabled_value=False
-        elif disabled in ('1','true'):
-            state='disabled'; disabled_value=True
+        disabled=p.get("disabled")
+        if disabled in (False,None,"","0","false"):
+            state="enabled"; disabled_value=False
+        elif disabled in ("1","true"):
+            state="disabled"; disabled_value=True
         else:
-            state='unknown'; disabled_value=None
-        scope=rule_list(p.get('scope')); tags=rule_list(p.get('tag'))
+            state="unknown"; disabled_value=None
+        scope=rule_list(p.get("scope")); tags=rule_list(p.get("tag"))
         if enabled is not None and (disabled_value is None or enabled==disabled_value):continue
-        if action is not None and p.get('action')!=action:continue
-        if category is not None and not (p.get('type')=='category' and p.get('target')==category):continue
-        if device is not None and not (scope is not None and device in [s.upper() for s in scope] or p.get('type')=='mac' and str(p.get('target','')).upper()==device):continue
-        if p.get('type')=='mac' and isinstance(p.get('target'),str) and re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',p['target']) and scope is not None:
-            scope=list(dict.fromkeys(scope+[p['target'].upper()]))
+        if action is not None and p.get("action")!=action:continue
+        if category is not None and not (p.get("type")=="category" and p.get("target")==category):continue
+        if device is not None and not (scope is not None and device in [s.upper() for s in scope] or p.get("type")=="mac" and str(p.get("target","")).upper()==device):continue
+        if p.get("type")=="mac" and isinstance(p.get("target"),str) and re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',p["target"]) and scope is not None:
+            scope=list(dict.fromkeys(scope+[p["target"].upper()]))
         scopes=[]
         if scope is None or tags is None:
-            scopes.append({'kind':'unknown','id':None,'name':None})
+            scopes.append({"kind":"unknown","id":None,"name":None})
         for value in scope or []:
             if re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}',value):
-                value=value.upper(); key='host:mac:'+value;name_keys.add(key)
-                scopes.append({'kind':'device','id':value,'_keys':[key]})
-            else:scopes.append({'kind':'unknown','id':rule_text(value,128),'name':None})
+                value=value.upper(); key="host:mac:"+value;name_keys.add(key)
+                scopes.append({"kind":"device","id":value,"_keys":[key]})
+            else:scopes.append({"kind":"unknown","id":rule_text(value,128),"name":None})
         for value in tags or []:
-            if value.startswith('tag:') and re.fullmatch(r'[0-9]{1,20}',value[4:]):
-                keys=[prefix+value[4:] for prefix in ('tag:uid:','deviceTag:uid:','userTag:uid:','ssidTag:uid:')]
-                name_keys.update(keys);scopes.append({'kind':'group','id':value[4:],'_keys':keys})
-            elif value.startswith('intf:') and re.fullmatch(r'[A-Za-z0-9_-]{1,64}',value[5:]):
-                key='network:uuid:'+value[5:];name_keys.add(key)
-                scopes.append({'kind':'network','id':value[5:],'_keys':[key]})
-            else:scopes.append({'kind':'unknown','id':rule_text(value,128),'name':None})
-        if not scopes:scopes=[{'kind':'global','id':None,'name':'All devices (configured scope)'}]
-        item={k:rule_text(p.get(k)) for k in ('type','target','action','direction','localPort','remotePort','protocol','cronTime','duration','expire','description','name','matchAppId','timezone','timestamp')}
-        item.update({'id':entry['id'],'disabled':disabled_value,'configured_state':state,'scopes':scopes,
-                     'effective_state':'unknown','state_explanation':'Stored rule setting only; schedules, expiry, exceptions and inherited applicability are not evaluated.'})
-        if disabled in (False,None,''):item['state_explanation']='Missing disabled flag defaults to enabled in reviewed Firewalla Policy.isDisabled; enforcement is not verified.'
-        item['app_id']=item['matchAppId'] or (item['target'][7:] if item['type']=='category' and item['target'] and item['target'].startswith('TLX-fw-') else None)
+            if value.startswith("tag:") and re.fullmatch(r'[0-9]{1,20}',value[4:]):
+                keys=[prefix+value[4:] for prefix in ("tag:uid:","deviceTag:uid:","userTag:uid:","ssidTag:uid:")]
+                name_keys.update(keys);scopes.append({"kind":"group","id":value[4:],"_keys":keys})
+            elif value.startswith("intf:") and re.fullmatch(r'[A-Za-z0-9_-]{1,64}',value[5:]):
+                key="network:uuid:"+value[5:];name_keys.add(key)
+                scopes.append({"kind":"network","id":value[5:],"_keys":[key]})
+            else:scopes.append({"kind":"unknown","id":rule_text(value,128),"name":None})
+        if not scopes:scopes=[{"kind":"global","id":None,"name":"All devices (configured scope)"}]
+        item={k:rule_text(p.get(k)) for k in ("type","target","action","direction","localPort","remotePort","protocol","cronTime","duration","expire","description","name","matchAppId","timezone","timestamp")}
+        item.update({"id":entry["id"],"disabled":disabled_value,"configured_state":state,"scopes":scopes,
+                     "effective_state":"unknown","state_explanation":"Stored rule setting only; schedules, expiry, exceptions and inherited applicability are not evaluated."})
+        if disabled in (False,None,""):item["state_explanation"]="Missing disabled flag defaults to enabled in reviewed Firewalla Policy.isDisabled; enforcement is not verified."
+        item["app_id"]=item["matchAppId"] or (item["target"][7:] if item["type"]=="category" and item["target"] and item["target"].startswith("TLX-fw-") else None)
         projected.append(item)
-    if len(name_keys)>128:raise Unsupported('name resolution bound; narrow page')
-    names=json.loads(run(['redis-cli','--raw','EVAL',RULE_NAMES_LUA,str(len(name_keys))]+sorted(name_keys))) if name_keys else {}
-    if not isinstance(names,dict) or names.get('oversized'):raise Unsupported('name metadata bound')
+    if len(name_keys)>128:raise Unsupported("name resolution bound; narrow page")
+    names=json.loads(run(["redis-cli","--raw","EVAL",RULE_NAMES_LUA,str(len(name_keys))]+sorted(name_keys))) if name_keys else {}
+    if not isinstance(names,dict) or names.get("oversized"):raise Unsupported("name metadata bound")
     for item in projected:
-        for scope in item['scopes']:
-            keys=scope.pop('_keys',[])
+        for scope in item["scopes"]:
+            keys=scope.pop("_keys",[])
             if keys:
-                candidates=[rule_text(names.get(key,{}).get(field)) for key in keys for field in ('name','bname','intf')]
-                scope['name']=next((v for v in candidates if v),None)
-                scope['name_resolution']='resolved' if scope['name'] else 'unavailable'
-    next_offset=offset+len(rows); more=next_offset<raw['total']
+                candidates=[rule_text(names.get(key,{}).get(field)) for key in keys for field in ("name","bname","intf")]
+                scope["name"]=next((v for v in candidates if v),None)
+                scope["name_resolution"]="resolved" if scope["name"] else "unavailable"
+    next_offset=offset+len(rows); more=next_offset<raw["total"]
     token=f"{next_offset}:{raw['version']}:{signature}" if more else None
-    return {'records':projected,'total':raw['total'],'total_semantics':'unfiltered_index_count',
-            'returned':len(projected),'scanned':len(rows),'skipped_missing':missing,'has_more':more,
-            'may_have_more':more,'cursor':token,'next_cursor':token,'restart_required':False,
-            'matched_total':None,'elapsed_ms':round((time.monotonic()-started)*1000,2),
-            'note':'Cursor advances scanned index entries, including filtered-out rules. Follow empty pages while has_more. Index changes require restart; field changes are not snapshot-isolated. Device filter matches explicit scope only; inherited group/network/global applicability is not evaluated. No enforcement claim.'}
+    return {"records":projected,"total":raw["total"],"total_semantics":"unfiltered_index_count",
+            "returned":len(projected),"scanned":len(rows),"skipped_missing":missing,"has_more":more,
+            "may_have_more":more,"cursor":token,"next_cursor":token,"restart_required":False,
+            "matched_total":None,"elapsed_ms":round((time.monotonic()-started)*1000,2),
+            "note":"Cursor advances scanned index entries, including filtered-out rules. Follow empty pages while has_more. Index changes require restart; field changes are not snapshot-isolated. Device filter matches explicit scope only; inherited group/network/global applicability is not evaluated. No enforcement claim."}
 
 
 def control_rules(args):
@@ -812,6 +816,8 @@ FORWARD_SOURCE_HASHES = {
     'extension/portforward/portforward.js':'0db0a855be5d04a5110b949342d26b5f62db6d48b9b249110321f0c410958158',
     'control/IptablesControl.js':'a6017d3f0d81cbb50d34fe7c835aa3a2dc284bd8d67d73f4587fd5582f74f772',
     'net2/Iptables.js':'891e5af9244d1b73ddb8b381129a29df8954d93344d12376f0a2f63679530ee1',
+    'net2/SysManager.js':'97dc3df125ce8b19332caca44791bcad0ec5c5181029f725908ffbef69ac8650',
+    'net2/NetworkProfile.js':'4d7b02f04169b062d79b4a77c81fa78e9e028e577518ac7437184973a17229c6',
     'net2/MessageBus.js':'4388bfbaf52f6e96a622bb3030139e00c85f3740f2b9b1fa2ceb9f8a2cd6dc26',
 }
 
@@ -830,21 +836,164 @@ def forward_port_range(value):
     return lo,hi
 
 
+def forward_scope(spec):
+    return spec["interface_uuid"] if spec["kind"]=="managed_interface_forward" else "VC:"+spec["profile"]
+
+
+def forward_networks():
+    """Project current UUID/name bindings only; discard DNS and unrelated fields locally."""
+    def read_hash(key):
+        values=run(["redis-cli","--raw","HGETALL",key]).splitlines()
+        if len(values)%2 or len(values)>128:raise Unsupported("network inventory bound")
+        return dict(zip(values[::2],values[1::2]))
+    records=read_hash("sys:network:uuid");info=read_hash("sys:network:info")
+    rows=[]
+    for uuid,raw in sorted(records.items()):
+        if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}",uuid):raise Unsupported("network UUID schema")
+        record=json.loads(raw);name=record.get("name")
+        if not isinstance(name,str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,32}",name):raise Unsupported("network name schema")
+        current=json.loads(info.get(name,"{}"))
+        if current.get("uuid")!=uuid:continue  # stale UUID entries are not selectable
+        if current.get("type") not in ("wan","lan"):continue
+        subnets=current.get("ip4_subnets",[])
+        if subnets is None:subnets=[]
+        if not isinstance(subnets,list) or len(subnets)>32:raise Unsupported("network subnet bound")
+        rows.append({"uuid":uuid,"interface":name,"type":current["type"],
+                     "subnets":[str(ipaddress.IPv4Network(v,strict=False)) for v in subnets]})
+    return rows
+
+
+def interface_forward_environment(spec):
+    import shlex
+    networks=forward_networks()
+    selected=[r for r in networks if r["uuid"]==spec["interface_uuid"] and r["type"]=="wan"]
+    if len(selected)!=1:raise Unsupported("select a current WAN network UUID")
+    if sum(r["uuid"][:13]==spec["interface_uuid"][:13] for r in networks)!=1:
+        raise Unsupported("native network ipset prefix collision")
+    if not any(ipaddress.IPv4Address(spec["destination_ip"]) in ipaddress.IPv4Network(n)
+               for r in networks if r["type"]=="lan" for n in r["subnets"]):
+        raise Unsupported("destination is not in an observed LAN subnet")
+    names=run(["sudo","-n","ipset","list","-name"]).splitlines()
+    names=[n for n in names if re.fullmatch(r'c_ip_[0-9a-f-]{13}_set',n)]
+    if len(names)>64:raise Unsupported("network ipset inventory bound")
+    sets={}
+    for name in names:
+        addresses=[]
+        for line in run(["sudo","-n","ipset","save",name]).splitlines():
+            parts=shlex.split(line)
+            if parts and parts[0]=="add":
+                if len(parts)!=3 or parts[1]!=name:raise Unsupported("network self-address set shape")
+                addresses.append(str(ipaddress.IPv4Address(parts[2])))
+        if len(addresses)>32:raise Unsupported("network self-address bound")
+        sets[name]=sorted(addresses)
+    selected_set="c_ip_"+spec["interface_uuid"][:13]+"_set"
+    addresses=sets.get(selected_set,[])
+    if not addresses:raise Unsupported("selected WAN has no self-address set")
+    if any(set(addresses)&set(v) for k,v in sets.items() if k!=selected_set):
+        raise Unsupported("overlapping network addresses; native destination scope is ambiguous")
+    # Observe routing without claiming an inbound connection's effective reply path.
+    routing=[json.loads(run(cmd)) for cmd in (["ip","-j","rule","show"],["ip","-j","route","show","table","all"])]
+    return {"network":selected[0],"addresses":addresses,"sets":sets,"networks":networks,"routing":routing}
+
+
+def nat_selectors(tokens):
+    """Read selector clauses, preserving each negation and skipping argument literals."""
+    aliases={"-j":"jump","--jump":"jump","-A":"chain","--append":"chain","-p":"protocol","--protocol":"protocol","--dport":"ports","--destination-port":"ports","--dports":"ports","--destination-ports":"ports"}
+    arities={"--match-set":2,"--tcp-flags":2,"--comment":1,"--string":1,"--hex-string":1,"--syn":0,"--random":0,"--random-fully":0,"--persistent":0}
+    found={};i=0;neg=False
+    while i<len(tokens):
+        flag=tokens[i];i+=1
+        if flag=="!":
+            if neg:raise Unsupported("ambiguous negation")
+            neg=True;continue
+        if not flag.startswith("-"):raise Unsupported("unrecognized NAT argument shape")
+        flag,eq,inline=flag.partition("=")
+        n=arities.get(flag,1)
+        if not eq and i<len(tokens) and tokens[i]=="!":neg=True;i+=1
+        if eq:values=[inline]
+        else:
+            values=tokens[i:i+n]
+            if flag not in aliases and flag not in arities and n==1 and (not values or values[0].startswith("-")):values=[];n=0
+            i+=n
+        if len(values)!=n or any(v=="!" for v in values):raise Unsupported("incomplete NAT selector")
+        key=aliases.get(flag)
+        if key:
+            if key in found or len(values)!=1:raise Unsupported("ambiguous NAT selector")
+            found[key]=(values[0],neg)
+        neg=False
+    if neg:raise Unsupported("incomplete negation")
+    return found
+
+
+def nat_overlaps(selectors, protocol, port_number):
+    value,neg=selectors.get("protocol",("all",False))
+    protocols={"all":0,"tcp":6,"udp":17,"icmp":1,"icmpv6":58,"sctp":132,"udplite":136,"gre":47,"esp":50,"ah":51}
+    number=protocols.get(value)
+    if number is None:
+        if not value.isdecimal() or not 0<=int(value)<=255:raise Unsupported("unknown NAT protocol")
+        number=int(value)
+    matches=number in (0,protocols[protocol])
+    if matches==neg:return False
+    if "ports" not in selectors:return True
+    value,neg=selectors["ports"];parts=value.split(",")
+    if not 1<=len(parts)<=15:raise Unsupported("NAT port-list bound")
+    matches=False
+    for part in parts:
+        if not re.fullmatch(r"[0-9]{0,5}(?:[:-][0-9]{0,5})?",part) or not part:raise Unsupported("unknown NAT port selector")
+        ends=re.split(r"[:-]",part)
+        lo=int(ends[0] or 0);hi=int(ends[-1] or 65535)
+        if not 0<=lo<=hi<=65535:raise Unsupported("invalid NAT port range")
+        matches=matches or lo<=port_number<=hi
+    return matches!=neg
+
+
+def interface_nat_guard(spec, owned, known_sets=None):
+    """Conservative possible-overlap evidence, never evidence of a desired mapping."""
+    import shlex
+    removed=False;evidence=[]
+    for line in run(["sudo","-n","iptables","-t","nat","-S"]).splitlines():
+        r=shlex.split(line)
+        if not r or r[0] not in ("-A","--append"):continue
+        selectors=nat_selectors(r)
+        if selectors.get("jump")!=("DNAT",False):continue
+        chain=selectors.get("chain",("unknown",False))[0]
+        if chain=="FW_PRERT_VC_PORT_FORWARD":continue
+        if not nat_overlaps(selectors,spec["protocol"],spec["external_port"]):continue
+        def value(flag):return r[r.index(flag)+1] if flag in r and r.index(flag)+1<len(r) else None
+        selected="c_ip_"+spec["interface_uuid"][:13]+"_set";match=value("--match-set")
+        if "!" not in r and known_sets and match in known_sets and match!=selected and r[r.index("--match-set")+2:r.index("--match-set")+3]==["dst"] and not set(known_sets[match])&set(known_sets.get(selected,[])):continue
+        expected={"-A":"FW_PRERT_PORT_FORWARD","-p":spec["protocol"],"--dport":str(spec["external_port"]),"--match-set":selected,"--to-destination":spec["destination_ip"]+":"+str(spec["destination_port"])}
+        if owned and not removed and "!" not in r and all(value(k)==v for k,v in expected.items()):removed=True;continue
+        evidence.append({"source":"kernel_dnat","chain":chain if re.fullmatch(r"[A-Za-z0-9_-]{1,64}",chain) else "unknown","protocol_overlap":True,"port_overlap":True,"scope":"potential; remaining matches not proven disjoint"})
+    return bool(evidence),{"count":len(evidence),"rules":evidence[:8],"truncated":len(evidence)>8}
+
+
+def forward_equivalent(row,spec):
+    return (row.get("toMac")==spec["device"] and row.get("toIP")==spec["destination_ip"]
+            and row.get("wanUUID")==forward_scope(spec) and row.get("protocol")==spec["protocol"]
+            and forward_port_range(row.get("dport"))==(spec["external_port"],)*2
+            and forward_port_range(row.get("toPort"))==(spec["destination_port"],)*2
+            and row.get("toMac")==spec["device"] and row.get("toIP")==spec["destination_ip"]
+            and row.get("enabled") is True and row.get("state") is not False and row.get("active") is not False
+            and row.get("_type","port_forward")=="port_forward" and not row.get("applyToAll") and not row.get("extIP"))
+
+
 def forward_value(spec, state=True):
     # Never send wildcards: native removePort/find matches more broadly with them.
-    return {'wanUUID':'VC:'+spec['profile'],'protocol':spec['protocol'],
-            'dport':str(spec['external_port']),'toPort':str(spec['destination_port']),
-            'toMac':spec['device'],'toIP':spec['destination_ip'],
-            '_type':'port_forward','enabled':True,'state':state,
-            'description':'mcp:'+spec['owner_token']}
+    return {"wanUUID":forward_scope(spec),"protocol":spec["protocol"],
+            "dport":str(spec["external_port"]),"toPort":str(spec["destination_port"]),
+            "toMac":spec["device"],"toIP":spec["destination_ip"],
+            "enabled":True,"state":state,
+            "description":"mcp:"+spec["owner_token"]}
 
 
 def forward_matches(row,spec):
     desired=forward_value(spec)
-    return (all(row.get(k)==v for k,v in desired.items() if k not in ('dport','toPort'))
-            and forward_port_range(row.get('dport'))==(spec['external_port'],)*2
-            and forward_port_range(row.get('toPort'))==(spec['destination_port'],)*2
-            and row.get('active') is not False and not row.get('applyToAll') and not row.get('extIP'))
+    return (row.get("_type", "port_forward")=="port_forward"
+            and all(row.get(k)==v for k,v in desired.items() if k not in ("dport","toPort"))
+            and forward_port_range(row.get("dport"))==(spec["external_port"],)*2
+            and forward_port_range(row.get("toPort"))==(spec["destination_port"],)*2
+            and row.get("active") is not False and not row.get("applyToAll") and not row.get("extIP"))
 
 
 def forward_ingress_guard(profile):
@@ -852,130 +1001,155 @@ def forward_ingress_guard(profile):
     # again. Overlapping tunnel addresses across clients would make selection
     # ambiguous; reject rather than promise isolation the native rule lacks.
     import shlex
-    selected='c_ip_'+profile[:13]+'_set4'
-    names=[v for v in run(['sudo','-n','ipset','list','-name']).splitlines() if re.fullmatch(r'c_ip_[A-Za-z0-9_]+_set4',v)]
-    if selected not in names or len(names)>32:raise Unsupported('VPN ingress set missing or inventory bound')
+    selected="c_ip_"+profile[:13]+"_set4"
+    names=[v for v in run(["sudo","-n","ipset","list","-name"]).splitlines() if re.fullmatch(r'c_ip_[A-Za-z0-9_]+_set4',v)]
+    if selected not in names or len(names)>32:raise Unsupported("VPN ingress set missing or inventory bound")
     sets={}
     for name in names:
         addresses=[]
-        for line in run(['sudo','-n','ipset','save',name]).splitlines():
+        for line in run(["sudo","-n","ipset","save",name]).splitlines():
             parts=shlex.split(line)
-            if parts and parts[0]=='add':
-                if len(parts)!=3 or parts[1]!=name:raise Unsupported('unsupported VPN self-address set shape')
+            if parts and parts[0]=="add":
+                if len(parts)!=3 or parts[1]!=name:raise Unsupported("unsupported VPN self-address set shape")
                 addresses.append(str(ipaddress.IPv4Address(parts[2])))
-        if len(addresses)>32:raise Unsupported('VPN address set bound')
+        if len(addresses)>32:raise Unsupported("VPN address set bound")
         sets[name]=sorted(addresses)
-    if not sets[selected]:raise Unsupported('selected VPN has no observed tunnel address')
+    if not sets[selected]:raise Unsupported("selected VPN has no observed tunnel address")
     if any(set(sets[selected]) & set(values) for name,values in sets.items() if name!=selected):
-        raise Unsupported('overlapping VPN tunnel addresses; native shared NAT cannot guarantee profile isolation')
+        raise Unsupported("overlapping VPN tunnel addresses; native shared NAT cannot guarantee profile isolation")
     return forward_digest(sets)
 
 
 def forward_snapshot(spec, expected_policy_profile=None, defer_ingress=False):
-    raw=run(['redis-cli','--raw','GET','extension.portforward.config']).strip()
-    config=json.loads(raw) if raw else {'maps':[]}
-    if not isinstance(config,dict) or set(config)!={'maps'} or not isinstance(config['maps'],list) or len(config['maps'])>256:
-        raise Unsupported('mapping schema or bound')
-    maps=config['maps'];collisions=[];owned=[]
+    raw=run(["redis-cli","--raw","GET","extension.portforward.config"]).strip()
+    config=json.loads(raw) if raw else {"maps":[]}
+    if not isinstance(config,dict) or set(config)!={"maps"} or not isinstance(config["maps"],list) or len(config["maps"])>256:
+        raise Unsupported("mapping schema or bound")
+    maps=config["maps"];collisions=[];owned=[]
     for row in maps:
-        if not isinstance(row,dict):raise Unsupported('mapping schema')
+        if not isinstance(row,dict):raise Unsupported("mapping schema")
         # A DMZ is a competing catch-all. A generic/default WAN forward does not
         # necessarily cover VPN, but applyToAll or the selected VC does.
-        relevant=bool(row.get('applyToAll')) or row.get('wanUUID')=='VC:'+spec['profile'] or row.get('_type')=='dmz_host'
-        if relevant and row.get('protocol') not in (None,'','tcp','udp'):raise Unsupported('unrecognized mapping protocol')
-        if relevant and row.get('protocol') in (None,'',spec['protocol']):
-            lo,hi=forward_port_range(row['dport']) if row.get('dport') else (1,65535)
-            if lo<=spec['external_port']<=hi:collisions.append(row)
-        if row.get('description')=='mcp:'+spec['owner_token']:owned.append(row)
-    if len(owned)>1:raise Unsupported('ambiguous mapping ownership')
-    ip=run(['redis-cli','--raw','HGET','host:mac:'+spec['device'],'ipv4Addr']).strip()
-    if ip!=spec['destination_ip']:raise Unsupported('destination device/IP binding changed')
-    policy_raw=run(['redis-cli','--raw','HGET','policy:mac:'+spec['device'],'vpnClient']).strip()
+        relevant=(bool(row.get("applyToAll")) or row.get("wanUUID")==forward_scope(spec) or row.get("_type")=="dmz_host"
+                  or (spec["kind"]=="managed_interface_forward" and not row.get("wanUUID")))
+        if relevant and row.get("protocol") not in (None,"","tcp","udp"):raise Unsupported("unrecognized mapping protocol")
+        if relevant and row.get("protocol") in (None,"",spec["protocol"]):
+            lo,hi=forward_port_range(row["dport"]) if row.get("dport") else (1,65535)
+            if lo<=spec["external_port"]<=hi:collisions.append(row)
+        if row.get("description")=="mcp:"+spec["owner_token"]:owned.append(row)
+    if len(owned)>1:raise Unsupported("ambiguous mapping ownership")
+    exact=len(collisions)==1 and forward_equivalent(collisions[0],spec)
+    details={"stored_mapping_count":len(collisions),"kernel_dnat":{"count":0,"rules":[],"truncated":False}}
+    ip=run(["redis-cli","--raw","HGET","host:mac:"+spec["device"],"ipv4Addr"]).strip()
+    if ip!=spec["destination_ip"]:raise Unsupported("destination device/IP binding changed")
+    policy_raw=run(["redis-cli","--raw","HGET","policy:mac:"+spec["device"],"vpnClient"]).strip()
     policy=json.loads(policy_raw) if policy_raw else None
-    if not isinstance(policy,dict) or policy.get('state') is not True or policy.get('profileId')!=(expected_policy_profile or spec['profile']):
-        raise Unsupported('explicit device VPN policy must match selected profile; inherited routing unsupported')
-    safety,settings_hash=managed_vpn_safety(spec['profile'])
-    ingress_hash='deferred until declared VPN start' if defer_ingress else forward_ingress_guard(spec['profile'])
-    return {'maps':maps,'owned':owned,'collisions':collisions,
-            'fingerprint':forward_digest({'maps':maps,'ip':ip,'vpn_policy':policy,'settings':settings_hash,'ingress':ingress_hash}),
-            'present':bool(collisions),'field':{k:owned[0].get(k) for k in forward_value(spec)} if owned else None,
-            'environment_fingerprint':forward_digest({'ip':ip,'vpn_policy':policy,'settings':settings_hash,'ingress':ingress_hash}),
-            'scope':'Persistent FireMain VPN mapping only; no firewall allow, provider port, VPN routing or conntrack change'}
+    if spec["kind"]=="managed_interface_forward":
+        environment=interface_forward_environment(spec)
+        conflict,kernel=interface_nat_guard(spec,bool(owned) or exact,environment.get("sets"))
+        if isinstance(kernel,dict):details["kernel_dnat"]=kernel
+        if conflict:collisions.append({"source":"observed competing DNAT"})
+        settings_hash=forward_digest({"environment":environment,"competing_nat":conflict})
+        ingress_hash=settings_hash
+    else:
+        if not isinstance(policy,dict) or policy.get("state") is not True or policy.get("profileId")!=(expected_policy_profile or spec["profile"]):
+            raise Unsupported("explicit device VPN policy must match selected profile; inherited routing unsupported")
+        safety,settings_hash=managed_vpn_safety(spec["profile"])
+        ingress_hash="deferred until declared VPN start" if defer_ingress else forward_ingress_guard(spec["profile"])
+    return {"maps":maps,"owned":owned,"collisions":collisions,
+            "fingerprint":forward_digest({"maps":maps,"ip":ip,"vpn_policy":policy,"settings":settings_hash,"ingress":ingress_hash}),
+            "present":bool(collisions),"conflict":bool(collisions) and not (exact and len(collisions)==1),"conflict_details":details,"field":{k:owned[0].get(k) for k in forward_value(spec)} if owned else None,
+            "environment_fingerprint":forward_digest({"ip":ip,"vpn_policy":policy,"settings":settings_hash,"ingress":ingress_hash}),
+            "scope":"Persistent FireMain mapping, destination-address interface scope (includes hairpin); return routing and external reachability unverified. No firewall allow, provider port, routing or conntrack change"}
 
 
 def forward_kernel_evidence(spec):
     import shlex
-    ipset='c_ip_'+spec['profile'][:13]+'_set4';interface='vpn_'+spec['profile']
-    def rules(chain):return [shlex.split(v) for v in run(['sudo','-n','iptables','-t','nat','-S',chain]).splitlines() if v.startswith('-A ')]
+    wan=spec["kind"]=="managed_interface_forward"
+    environment=interface_forward_environment(spec) if wan else None
+    ipset=("c_ip_"+spec["interface_uuid"][:13]+"_set") if wan else "c_ip_"+spec["profile"][:13]+"_set4"
+    interface=None if wan else "vpn_"+spec["profile"]
+    def rules(chain):return [shlex.split(v) for v in run(["sudo","-n","iptables","-t","nat","-S",chain]).splitlines() if v.startswith("-A ")]
     def has(row,flag,value):
-        return any(row[i:i+1]==[flag] and row[i+1:i+1+len(value)]==value for i in range(len(row)))
-    nat=any(has(r,'-p',[spec['protocol']]) and has(r,'--dport',[str(spec['external_port'])]) and
-            has(r,'--match-set',[ipset,'dst']) and has(r,'-j',['DNAT']) and
-            has(r,'--to-destination',[spec['destination_ip']+':'+str(spec['destination_port'])])
-            for r in rules('FW_PRERT_VC_PORT_FORWARD'))
-    ingress=any(has(r,'-i',[interface]) and has(r,'--match-set',[ipset,'dst']) and
-                has(r,'-j',['FW_PRERT_VC_PORT_FORWARD']) for r in rules('FW_PREROUTING_VC_EXT_IP'))
-    return {'nat_rule_observed':nat,'vpn_ingress_link_observed':ingress,
-            'return_routing':'configured matching device VPN policy; effective reply path unverified',
-            'firewall_acceptance':'not tested or changed','external_reachability':'not tested',
-            'conntrack':'existing flows not flushed; test a new independent external flow',
-            'restart_persistence':'native stored mapping is restored by FireMain startup; no restart/reboot tested'}
+        return "!" not in row and any(row[i:i+1]==[flag] and row[i+1:i+1+len(value)]==value for i in range(len(row)))
+    def native(row,chain):
+        allowed=({"-A":1,"-d":1,"-j":1} if chain=="wan_ingress" else {"-A":1,"-i":1,"-m":1,"--match-set":2,"-j":1} if chain=="vpn_ingress" else {"-A":1,"-p":1,"-m":1,"--dport":1,"--match-set":2,"-j":1,"--to-destination":1})
+        i=0
+        while i<len(row):
+            n=allowed.get(row[i])
+            if n is None or i+n>=len(row):return False
+            if row[i]=="-m" and row[i+1] not in ("tcp","udp","set"):return False
+            if row[i] in ("-d","-i") and chain=="nat":return False
+            i+=n+1
+        return True
+    nat=any(native(r,"nat") and has(r,"-p",[spec["protocol"]]) and has(r,"--dport",[str(spec["external_port"])]) and
+            has(r,"--match-set",[ipset,"dst"]) and has(r,"-j",["DNAT"]) and
+            has(r,"--to-destination",[spec["destination_ip"]+":"+str(spec["destination_port"])])
+            for r in rules("FW_PRERT_PORT_FORWARD" if wan else "FW_PRERT_VC_PORT_FORWARD"))
+    ingress=all(any(has(r,"-d",[address+"/32"]) or has(r,"-d",[address]) for r in rules("FW_PREROUTING_EXT_IP") if native(r,"wan_ingress") and has(r,"-j",["FW_PRERT_PORT_FORWARD"])) for address in environment["addresses"]) if wan else any(native(r,"vpn_ingress") and has(r,"-i",[interface]) and has(r,"--match-set",[ipset,"dst"]) and
+                has(r,"-j",["FW_PRERT_VC_PORT_FORWARD"]) for r in rules("FW_PREROUTING_VC_EXT_IP"))
+    return {"nat_rule_observed":nat,"vpn_ingress_link_observed":ingress,
+            "interface_scope":"WAN destination-address set, including hairpin; not a physical ingress-only ACL" if wan else "VPN tunnel destination-address set",
+            "return_routing":"Observed routing fingerprint bound; effective reply path and inherited policy unverified" if wan else "configured matching device VPN policy; effective reply path unverified",
+            "firewall_acceptance":"not tested or changed","external_reachability":"not tested",
+            "conntrack":"existing flows not flushed; test a new independent external flow",
+            "restart_persistence":"native stored mapping is restored by FireMain startup; no restart/reboot tested"}
 
 
 def managed_forward(args):
-    spec=args['spec'];mode=args['mode'];context=args.get('context')
-    if context is not None and context!={'owner_token':spec['owner_token']}:
-        raise ValueError('mapping rollback ownership mismatch')
+    spec=args["spec"];mode=args["mode"];context=args.get("context")
+    if context is not None and context!={"owner_token":spec["owner_token"]}:
+        raise ValueError("mapping rollback ownership mismatch")
     before=forward_snapshot(spec)
-    if mode=='preview':
-        return {k:before[k] for k in ('fingerprint','present','field','scope')}
-    if args.get('expected')!=before['fingerprint']:return {'outcome':'stale','changed':False}
-    if not time.time()<spec['maintenance_until']<=time.time()+600:raise ValueError('forward maintenance window expired')
-    if mode=='apply' and (before['collisions'] or before['owned']):return {'outcome':'stale','changed':False}
-    if mode=='rollback' and (len(before['owned'])!=1 or not forward_matches(before['owned'][0],spec) or len(before['collisions'])!=1):
-        return {'outcome':'stale','changed':False}
+    if mode=="preview":
+        return {k:before[k] for k in ("fingerprint","present","field","scope","conflict","conflict_details")}
+    if args.get("expected")!=before["fingerprint"]:return {"outcome":"stale","changed":False}
+    if not time.time()<spec["maintenance_until"]<=time.time()+600:raise ValueError("forward maintenance window expired")
+    if mode=="apply" and (before["collisions"] or before["owned"]):return {"outcome":"stale","changed":False}
+    if mode=="rollback" and (len(before["owned"])!=1 or not forward_matches(before["owned"][0],spec) or len(before["collisions"])!=1):
+        return {"outcome":"stale","changed":False}
     # Native queue has no compare-and-set. The approved maintenance window must
     # exclude concurrent app/API mapping edits; do not claim atomic protection.
     try:
         require_action_deadline(args)
-        management_request('set','policy','0.0.0.0',{'portforward':forward_value(spec,mode=='apply')})
-        end=min(time.monotonic()+5,time.monotonic()+max(0,args['expires_at']-time.time()))
+        management_request("set","policy","0.0.0.0",{"portforward":forward_value(spec,mode=="apply")})
+        end=min(time.monotonic()+5,time.monotonic()+max(0,args["expires_at"]-time.time()))
         after=None
         while time.monotonic()<end:
             time.sleep(.25);after=forward_snapshot(spec)
-            if mode=='apply' and len(after['owned'])==1 and forward_matches(after['owned'][0],spec):break
-            if mode=='rollback' and not after['owned']:break
-        verified=after is not None and (len(after['owned'])==1 and forward_matches(after['owned'][0],spec) if mode=='apply' else not after['owned'])
-        if not verified:return {'outcome':'uncertain','changed':None,'reason':'Queued mapping not verified; do not retry or remove unknown entries'}
-        before_other=[r for r in before['maps'] if r.get('description')!='mcp:'+spec['owner_token']]
-        after_other=[r for r in after['maps'] if r.get('description')!='mcp:'+spec['owner_token']]
-        if forward_digest(before_other)!=forward_digest(after_other) or before['environment_fingerprint']!=after['environment_fingerprint']:
-            return {'outcome':'uncertain','changed':None,'reason':'Concurrent state change detected after submission; inspect without rollback'}
+            if mode=="apply" and len(after["owned"])==1 and forward_matches(after["owned"][0],spec):break
+            if mode=="rollback" and not after["owned"]:break
+        verified=after is not None and (len(after["owned"])==1 and forward_matches(after["owned"][0],spec) if mode=="apply" else not after["owned"])
+        if not verified:return {"outcome":"uncertain","changed":None,"reason":"Queued mapping not verified; do not retry or remove unknown entries"}
+        before_other=[r for r in before["maps"] if r.get("description")!="mcp:"+spec["owner_token"]]
+        after_other=[r for r in after["maps"] if r.get("description")!="mcp:"+spec["owner_token"]]
+        if forward_digest(before_other)!=forward_digest(after_other) or before["environment_fingerprint"]!=after["environment_fingerprint"]:
+            return {"outcome":"uncertain","changed":None,"reason":"Concurrent state change detected after submission; inspect without rollback"}
         evidence=forward_kernel_evidence(spec)
-        kernel_verified=(evidence['nat_rule_observed'] and evidence['vpn_ingress_link_observed']) if mode=='apply' else not evidence['nat_rule_observed']
+        kernel_verified=(evidence["nat_rule_observed"] and evidence["vpn_ingress_link_observed"]) if mode=="apply" else not evidence["nat_rule_observed"]
         # Confirm configured state, separately reporting kernel evidence. Never
         # call this effective reachability or firewall permission.
-        return {'outcome':('applied' if mode=='apply' else 'rolled_back') if kernel_verified else 'uncertain',
-                'verification':'stored_mapping_verified','evidence':evidence,
-                'context':{'owner_token':spec['owner_token']},
-                'state':{k:after[k] for k in ('fingerprint','present','field','scope')}}
+        return {"outcome":("applied" if mode=="apply" else "rolled_back") if kernel_verified else "uncertain",
+                "verification":"stored_mapping_verified","evidence":evidence,
+                "context":{"owner_token":spec["owner_token"]},
+                "state":{k:after[k] for k in ("fingerprint","present","field","scope","conflict","conflict_details")}}
     except Exception:
-        return {'outcome':'uncertain','changed':None,'reason':'Queued operation may have executed; inspect before any further action'}
+        return {"outcome":"uncertain","changed":None,"reason":"Queued operation may have executed; inspect before any further action"}
 
 
 def workflow_specs(spec):
-    required={'kind','device','destination_ip','expected_profile','destination_profile','vpn_type','forwards','maintenance_until'}
-    if not isinstance(spec,dict) or set(spec)!=required or spec['kind']!='vpn_workflow':raise ValueError('workflow shape')
-    lifecycle={'kind':'managed_lifecycle','profile':spec['destination_profile'],'vpn_type':spec['vpn_type'],'desired':'connect'}
-    switch={'kind':'managed_vpn','device':spec['device'],'expected_profile':spec['expected_profile'],'destination_profile':spec['destination_profile']}
+    required={"kind","device","destination_ip","expected_profile","destination_profile","vpn_type","forwards","maintenance_until"}
+    if not isinstance(spec,dict) or set(spec)!=required or spec["kind"]!="vpn_workflow":raise ValueError("workflow shape")
+    lifecycle={"kind":"managed_lifecycle","profile":spec["destination_profile"],"vpn_type":spec["vpn_type"],"desired":"connect"}
+    switch={"kind":"managed_vpn","device":spec["device"],"expected_profile":spec["expected_profile"],"destination_profile":spec["destination_profile"]}
     validate_managed(lifecycle);validate_managed(switch)
-    if not isinstance(spec['forwards'],list) or not 1<=len(spec['forwards'])<=2:raise ValueError('one or two exact forwarding actions required')
+    if not isinstance(spec["forwards"],list) or not 1<=len(spec["forwards"])<=2:raise ValueError("one or two exact forwarding actions required")
     forwards=[]
-    for row in spec['forwards']:
-        if not isinstance(row,dict) or set(row)!={'protocol','external_port','destination_port','owner_token'}:raise ValueError('workflow forward shape')
-        item=dict(kind='managed_forward',device=spec['device'],destination_ip=spec['destination_ip'],profile=spec['destination_profile'],maintenance_until=spec['maintenance_until'],**row)
+    for row in spec["forwards"]:
+        if not isinstance(row,dict) or set(row)!={"protocol","external_port","destination_port","owner_token"}:raise ValueError("workflow forward shape")
+        item=dict(kind="managed_forward",device=spec["device"],destination_ip=spec["destination_ip"],profile=spec["destination_profile"],maintenance_until=spec["maintenance_until"],**row)
         validate_managed(item);forwards.append(item)
-    if len(forwards)==2:validate_managed({'kind':'managed_forward_batch','steps':forwards})
+    if len(forwards)==2:validate_managed({"kind":"managed_forward_batch","steps":forwards})
     return [lifecycle,switch]+forwards
 
 
@@ -984,170 +1158,175 @@ def workflow_profile_version(profile):
     # ctime detects ordinary replacement/in-place edits even if mtime is restored.
     import stat
     rows=[]
-    for folder,suffixes in (('ovpn_profile',('.ovpn','.settings','.userpass','.password')),('wg_profile',('.json','.settings'))):
-        parent='/home/pi/.firewalla/run/'+folder
+    for folder,suffixes in (("ovpn_profile",(".ovpn",".settings",".userpass",".password")),("wg_profile",(".json",".settings"))):
+        parent="/home/pi/.firewalla/run/"+folder
         if not os.path.isdir(parent):continue
-        if not stat.S_ISDIR(os.lstat(parent).st_mode):raise Unsupported('profile parent is not a real directory')
+        if not stat.S_ISDIR(os.lstat(parent).st_mode):raise Unsupported("profile parent is not a real directory")
         for suffix in suffixes:
-            path=parent+'/'+profile+suffix
+            path=parent+"/"+profile+suffix
             try:info=os.lstat(path)
             except FileNotFoundError:rows.append([folder,suffix,None]);continue
-            if not stat.S_ISREG(info.st_mode):raise Unsupported('profile input not regular')
+            if not stat.S_ISREG(info.st_mode):raise Unsupported("profile input not regular")
             rows.append([folder,suffix,info.st_ino,info.st_dev,info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_mode,info.st_uid,info.st_gid])
     return forward_digest(rows)
 
 
 def workflow_state(args):
-    spec=args['spec'];steps=workflow_specs(spec)
-    management_guard(args.get('revision'),'managed_forward')
+    spec=args["spec"];steps=workflow_specs(spec)
+    management_guard(args.get("revision"),"managed_forward")
     policy=managed_field_read(steps[1])
-    if policy['profileId'] not in (spec['expected_profile'],spec['destination_profile']):raise Unsupported('workflow device policy outside declared transition')
-    old,old_hash=managed_vpn_safety(spec['expected_profile']);new,new_hash=managed_vpn_safety(spec['destination_profile'])
-    if old!=new:raise Unsupported('workflow safety/DNS mismatch')
+    if policy["profileId"] not in (spec["expected_profile"],spec["destination_profile"]):raise Unsupported("workflow device policy outside declared transition")
+    old,old_hash=managed_vpn_safety(spec["expected_profile"]);new,new_hash=managed_vpn_safety(spec["destination_profile"])
+    if old!=new:raise Unsupported("workflow safety/DNS mismatch")
     life=managed_lifecycle_state(steps[0])
-    snapshots=[forward_snapshot(step,expected_policy_profile=policy['profileId'],defer_ingress=True) for step in steps[2:]]
-    maps=snapshots[0]['maps'];tokens={s['owner_token']:i for i,s in enumerate(steps[2:])};owned=[];unrelated=[]
+    snapshots=[forward_snapshot(step,expected_policy_profile=policy["profileId"],defer_ingress=True) for step in steps[2:]]
+    maps=snapshots[0]["maps"];tokens={s["owner_token"]:i for i,s in enumerate(steps[2:])};owned=[];unrelated=[]
     for row in maps:
-        token=str(row.get('description','')).removeprefix('mcp:')
+        token=str(row.get("description","")).removeprefix("mcp:")
         if token in tokens:
             index=tokens[token]
-            if index in owned or not forward_matches(row,steps[index+2]):raise Unsupported('workflow owned mapping changed')
+            if index in owned or not forward_matches(row,steps[index+2]):raise Unsupported("workflow owned mapping changed")
             owned.append(index)
         else:unrelated.append(row)
     # Existing/range/disabled conflicts are blockers unless they are exact earlier
     # results from this immutable workflow. Later own additions are rejected by host.
     for item in snapshots:
-        if any(row not in [r for r in maps if str(r.get('description','')).removeprefix('mcp:') in tokens] for row in item['collisions']):
-            raise Unsupported('workflow existing mapping conflict')
-    ip=run(['redis-cli','--raw','HGET','host:mac:'+spec['device'],'ipv4Addr']).strip()
-    return {'stable':forward_digest({'maps':unrelated,'ip':ip,'profiles':[old_hash,new_hash],
-                    'profile_file_versions':[workflow_profile_version(spec['expected_profile']),workflow_profile_version(spec['destination_profile'])]}),
-            'policy':policy,'lifecycle':life,'owned_forward_steps':sorted(owned),
-            'limits':'Observed connection only; no peer/provider reachability or effective device-route claim'}
+        if any(row not in [r for r in maps if str(r.get("description","")).removeprefix("mcp:") in tokens] for row in item["collisions"]):
+            raise Unsupported("workflow existing mapping conflict")
+    ip=run(["redis-cli","--raw","HGET","host:mac:"+spec["device"],"ipv4Addr"]).strip()
+    return {"stable":forward_digest({"maps":unrelated,"ip":ip,"profiles":[old_hash,new_hash],
+                    "profile_file_versions":[workflow_profile_version(spec["expected_profile"]),workflow_profile_version(spec["destination_profile"])]}),
+            "policy":policy,"lifecycle":life,"owned_forward_steps":sorted(owned),
+            "limits":"Observed connection only; no peer/provider reachability or effective device-route claim"}
 
 
 def managed_forward_batch(args):
-    steps=args['spec']['steps'];mode=args['mode']
-    if mode=='rollback':raise Unsupported('compound rollback requires separately reviewed reverse actions')
+    steps=args["spec"]["steps"];mode=args["mode"]
+    if mode=="rollback":raise Unsupported("compound rollback requires separately reviewed reverse actions")
     states=[forward_snapshot(step) for step in steps]
-    fingerprint=forward_digest([s['fingerprint'] for s in states])
-    if mode=='preview':
-        return {'fingerprint':fingerprint,'present':any(s['present'] for s in states),
-                'field':None,'scope':'Ordered persistent VPN mappings; not atomic; stop on first unverified step',
-                'rollback':'No batch automatic rollback; inspect completed mappings before a separate exact removal plan'}
-    if args.get('expected')!=fingerprint:return {'outcome':'stale','changed':False,'steps':[]}
-    if any(s['present'] for s in states):return {'outcome':'stale','changed':False,'steps':[]}
-    baseline=forward_digest(states[0]['maps']);environment=states[0]['environment_fingerprint'];results=[];completed=[]
+    fingerprint=forward_digest([s["fingerprint"] for s in states])
+    if mode=="preview":
+        return {"fingerprint":fingerprint,"present":any(s["present"] for s in states),
+                "conflict":any(s["present"] for s in states),"conflict_details":{"steps":[{"index":i,"exact_configured":not s["conflict"],**s["conflict_details"]} for i,s in enumerate(states) if s["present"]]},
+                "field":None,"scope":"Ordered persistent mappings; not atomic; stop on first unverified step",
+                "rollback":"No batch automatic rollback; inspect completed mappings before a separate exact removal plan"}
+    if args.get("expected")!=fingerprint:return {"outcome":"stale","changed":False,"steps":[]}
+    if any(s["present"] for s in states):return {"outcome":"stale","changed":False,"steps":[]}
+    baseline=forward_digest(states[0]["maps"]);environment=states[0]["environment_fingerprint"];results=[];completed=[]
     for index,step in enumerate(steps):
         try:current=forward_snapshot(step)
-        except Exception:return {'outcome':'partial' if results else 'stale','steps':results,'stopped_at':index,'reason':'precondition read failed; inspect before further action'}
+        except Exception:return {"outcome":"partial" if results else "stale","steps":results,"stopped_at":index,"reason":"precondition read failed; inspect before further action"}
         # Only exact mappings created by earlier verified steps may differ from
         # the initial snapshot. Never adopt arbitrary fresh state as approved.
-        own={s['owner_token']:s for s in completed};remaining=[];seen=set()
-        for row in current['maps']:
-            token=str(row.get('description','')).removeprefix('mcp:')
+        own={s["owner_token"]:s for s in completed};remaining=[];seen=set()
+        for row in current["maps"]:
+            token=str(row.get("description","")).removeprefix("mcp:")
             if token in own:
                 if token in seen or not forward_matches(row,own[token]):
-                    return {'outcome':'partial','steps':results,'stopped_at':index,'reason':'earlier step changed; inspect'}
+                    return {"outcome":"partial","steps":results,"stopped_at":index,"reason":"earlier step changed; inspect"}
                 seen.add(token)
             else:remaining.append(row)
-        if seen!=set(own) or forward_digest(remaining)!=baseline or current['environment_fingerprint']!=environment:
-            return {'outcome':'partial' if results else 'stale','steps':results,'stopped_at':index,'reason':'unexpected state drift; inspect'}
+        if seen!=set(own) or forward_digest(remaining)!=baseline or current["environment_fingerprint"]!=environment:
+            return {"outcome":"partial" if results else "stale","steps":results,"stopped_at":index,"reason":"unexpected state drift; inspect"}
         try:
             require_action_deadline(args)
-            result=managed_forward({'spec':step,'mode':'apply','expected':current['fingerprint'],'expires_at':args['expires_at']})
+            result=managed_forward({"spec":step,"mode":"apply","expected":current["fingerprint"],"expires_at":args["expires_at"]})
         except Exception:
-            return {'outcome':'partial' if results else 'uncertain','steps':results,'stopped_at':index,'reason':'step interrupted or deadline elapsed; inspect before retry'}
-        results.append({'index':index,'result':result})
-        if result.get('outcome')!='applied':
-            return {'outcome':'partial' if index else result.get('outcome','uncertain'),'steps':results,'stopped_at':index,
-                    'resume':'No blind retry or rollback. Inspect the uncertain step; prepare a fresh plan for remaining actions.'}
+            return {"outcome":"partial" if results else "uncertain","steps":results,"stopped_at":index,"reason":"step interrupted or deadline elapsed; inspect before retry"}
+        results.append({"index":index,"result":result})
+        if result.get("outcome")!="applied":
+            return {"outcome":"partial" if index else result.get("outcome","uncertain"),"steps":results,"stopped_at":index,
+                    "resume":"No blind retry or rollback. Inspect the uncertain step; prepare a fresh plan for remaining actions."}
         completed.append(step)
-    return {'outcome':'applied','steps':results,'atomic':False,'rollback':'Separate verified removal plans only',
-            'resume':'Completed plan cannot be replayed'}
+    return {"outcome":"applied","steps":results,"atomic":False,"rollback":"Separate verified removal plans only",
+            "resume":"Completed plan cannot be replayed"}
 
 
 def validate_managed(spec):
-    if not isinstance(spec, dict) or spec.get('kind') not in ('managed_feature', 'managed_rule', 'managed_vpn', 'managed_scoped', 'managed_lifecycle', 'managed_forward', 'managed_forward_batch'):
-        raise ValueError('managed kind')
-    if spec['kind']=='managed_forward_batch':
-        if set(spec)!={'kind','steps'} or not isinstance(spec['steps'],list) or not 2<=len(spec['steps'])<=4:raise ValueError('bounded forward plan required')
+    if not isinstance(spec, dict) or spec.get("kind") not in ("managed_feature", "managed_rule", "managed_vpn", "managed_scoped", "managed_lifecycle", "managed_forward", "managed_interface_forward", "managed_forward_batch"):
+        raise ValueError("managed kind")
+    if spec["kind"]=="managed_forward_batch":
+        if set(spec)!={"kind","steps"} or not isinstance(spec["steps"],list) or not 2<=len(spec["steps"])<=4:raise ValueError("bounded forward plan required")
         seen=set();owners=set();scope=None
-        for step in spec['steps']:
-            if not isinstance(step,dict) or step.get('kind')!='managed_forward':raise ValueError('unsupported compound step')
+        for step in spec["steps"]:
+            if not isinstance(step,dict) or step.get("kind") not in ("managed_forward","managed_interface_forward"):raise ValueError("unsupported compound step")
             validate_managed(step)
-            current=(step['device'],step['destination_ip'],step['profile'],step['maintenance_until'])
-            if scope is not None and current!=scope:raise ValueError('compound forwards require same target/profile/window')
-            scope=current;key=(step['protocol'],step['external_port'])
-            if key in seen or step['owner_token'] in owners:raise ValueError('overlapping compound mapping')
-            seen.add(key);owners.add(step['owner_token'])
+            current=(step["device"],step["destination_ip"],forward_scope(step),step["maintenance_until"])
+            if scope is not None and current!=scope:raise ValueError("compound forwards require same target/profile/window")
+            scope=current;key=(step["protocol"],step["external_port"])
+            if key in seen or step["owner_token"] in owners:raise ValueError("overlapping compound mapping")
+            seen.add(key);owners.add(step["owner_token"])
         return spec
-    if spec['kind']=='managed_forward':
-        keys={'kind','profile','device','destination_ip','protocol','external_port','destination_port','owner_token','maintenance_until'}
-        if set(spec)!=keys or spec['protocol'] not in ('tcp','udp'):raise ValueError('forward arguments')
-        if not re.fullmatch(r'[A-Za-z0-9_]{1,10}',spec['profile']) or not re.fullmatch(r'[a-f0-9]{32}',spec['owner_token']):raise ValueError('forward profile/ownership')
-        if not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}',spec['device']):raise ValueError('forward device')
-        spec['destination_ip']=str(ipaddress.IPv4Address(spec['destination_ip']))
-        if any(type(spec[k]) is not int or not 1<=spec[k]<=65535 for k in ('external_port','destination_port')):raise ValueError('forward ports')
-        if type(spec['maintenance_until']) is not int:raise ValueError('maintenance window')
+    if spec["kind"] in ("managed_forward","managed_interface_forward"):
+        keys={"kind","profile","device","destination_ip","protocol","external_port","destination_port","owner_token","maintenance_until"}
+        if spec["kind"]=="managed_interface_forward":keys=(keys-{"profile"})|{"interface_uuid"}
+        if set(spec)!=keys or spec["protocol"] not in ("tcp","udp"):raise ValueError("forward arguments")
+        if spec["kind"]=="managed_interface_forward":
+            if not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',spec["interface_uuid"]):raise ValueError("canonical WAN UUID required")
+        elif not re.fullmatch(r'[A-Za-z0-9_]{1,10}',spec["profile"]):raise ValueError("forward profile")
+        if not re.fullmatch(r'[a-f0-9]{32}',spec["owner_token"]):raise ValueError("forward profile/ownership")
+        if not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}',spec["device"]):raise ValueError("forward device")
+        spec["destination_ip"]=str(ipaddress.IPv4Address(spec["destination_ip"]))
+        if any(type(spec[k]) is not int or not 1<=spec[k]<=65535 for k in ("external_port","destination_port")):raise ValueError("forward ports")
+        if type(spec["maintenance_until"]) is not int:raise ValueError("maintenance window")
         return spec
-    if spec['kind']=='managed_lifecycle':
-        if set(spec)!={'kind','profile','vpn_type','desired'} or spec['vpn_type'] not in ('openvpn','wireguard') or spec['desired'] not in ('connect','disconnect') or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,10}',spec['profile']):
-            raise ValueError('lifecycle arguments')
+    if spec["kind"]=="managed_lifecycle":
+        if set(spec)!={"kind","profile","vpn_type","desired"} or spec["vpn_type"] not in ("openvpn","wireguard") or spec["desired"] not in ("connect","disconnect") or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,10}',spec["profile"]):
+            raise ValueError("lifecycle arguments")
         return spec
-    if spec['kind']=='managed_scoped':
-        if set(spec)!={'kind','scope','target','feature','desired'} or spec['scope'] not in ('group','network') or spec['feature'] not in ('adblock','safeSearch','unbound','doh','ntp_redirect') or spec['desired'] not in ('enable','disable','inherit'):
-            raise ValueError('scoped arguments')
-        pattern=r'[0-9]{1,20}' if spec['scope']=='group' else r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
-        if not re.fullmatch(pattern,spec['target']) or (spec['feature']=='ntp_redirect' and spec['scope']!='network'):
-            raise ValueError('scoped target')
+    if spec["kind"]=="managed_scoped":
+        if set(spec)!={"kind","scope","target","feature","desired"} or spec["scope"] not in ("group","network") or spec["feature"] not in ("adblock","safeSearch","unbound","doh","ntp_redirect") or spec["desired"] not in ("enable","disable","inherit"):
+            raise ValueError("scoped arguments")
+        pattern=r'[0-9]{1,20}' if spec["scope"]=="group" else r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
+        if not re.fullmatch(pattern,spec["target"]) or (spec["feature"]=="ntp_redirect" and spec["scope"]!="network"):
+            raise ValueError("scoped target")
         return spec
-    mac = spec.get('device', '')
+    mac = spec.get("device", "")
     if not isinstance(mac, str) or not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}', mac):
-        raise ValueError('canonical device MAC required')
-    kind = spec['kind']
-    if kind == 'managed_feature':
-        if set(spec) != {'kind','device','feature','desired'} or spec['feature'] not in ('adblock','safeSearch','unbound','doh') or spec['desired'] not in ('enable','disable','inherit'):
-            raise ValueError('feature arguments')
-    elif kind == 'managed_vpn':
-        if set(spec) != {'kind','device','expected_profile','destination_profile'}:
-            raise ValueError('VPN arguments')
-        for key in ('expected_profile','destination_profile'):
+        raise ValueError("canonical device MAC required")
+    kind = spec["kind"]
+    if kind == "managed_feature":
+        if set(spec) != {"kind","device","feature","desired"} or spec["feature"] not in ("adblock","safeSearch","unbound","doh") or spec["desired"] not in ("enable","disable","inherit"):
+            raise ValueError("feature arguments")
+    elif kind == "managed_vpn":
+        if set(spec) != {"kind","device","expected_profile","destination_profile"}:
+            raise ValueError("VPN arguments")
+        for key in ("expected_profile","destination_profile"):
             if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}',spec[key]):
-                raise ValueError('profile identifier')
-        if spec['expected_profile'] == spec['destination_profile']:
-            raise ValueError('same profile')
+                raise ValueError("profile identifier")
+        if spec["expected_profile"] == spec["destination_profile"]:
+            raise ValueError("same profile")
     else:
-        if set(spec)-{'schedule','address'} != {'kind','device','rule_type','target'} or spec['rule_type'] not in ('internet','category','app','ip','dns','dns_override'):
-            raise ValueError('rule arguments')
-        if 'schedule' in spec:
-            schedule=spec['schedule']
-            if spec['rule_type'] not in ('category','app') or not isinstance(schedule,dict) or set(schedule)!={'hour','minute','days','duration','timezone'}:
-                raise ValueError('schedule shape')
-            for key,maximum in (('hour',23),('minute',59)):
-                if type(schedule[key]) is not int or not 0<=schedule[key]<=maximum:raise ValueError('schedule time')
-            if type(schedule['duration']) is not int or not 60<=schedule['duration']<=79200:raise ValueError('duration')
-            days=schedule['days']
-            if not isinstance(days,list) or not 1<=len(days)<=7 or any(type(d) is not int or not 0<=d<=6 for d in days) or len(set(days))!=len(days):raise ValueError('weekdays')
-            if not isinstance(schedule['timezone'],str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}',schedule['timezone']):raise ValueError('timezone')
-        if spec['rule_type']=='dns_override':
-            spec['address']=canonical_rule_ip(spec['address'])
-        elif 'address' in spec:raise ValueError('address only for DNS override')
-        target = spec['target']
-        if spec['rule_type'] == 'internet' and target != 'internet':
-            raise ValueError('internet target')
-        if spec['rule_type'] == 'category' and target not in ('games','social','av','porn','vpn'):
-            raise ValueError('category identifier')
-        if spec['rule_type'] == 'app' and not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',target):
-            raise ValueError('app identifier')
-        if spec['rule_type'] == 'ip':
-            spec['target']=canonical_rule_ip(target)
-        if spec['rule_type'] in ('dns','dns_override') and (len(target)>253 or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?',part) for part in target.split('.'))):
-            raise ValueError('domain')
-        if spec['rule_type'] in ('dns','dns_override'):
-            spec['target']=target.lower()
-        if 'schedule' in spec:
-            spec['schedule']['days']=sorted(spec['schedule']['days'])
+        if set(spec)-{"schedule","address"} != {"kind","device","rule_type","target"} or spec["rule_type"] not in ("internet","category","app","ip","dns","dns_override"):
+            raise ValueError("rule arguments")
+        if "schedule" in spec:
+            schedule=spec["schedule"]
+            if spec["rule_type"] not in ("category","app") or not isinstance(schedule,dict) or set(schedule)!={"hour","minute","days","duration","timezone"}:
+                raise ValueError("schedule shape")
+            for key,maximum in (("hour",23),("minute",59)):
+                if type(schedule[key]) is not int or not 0<=schedule[key]<=maximum:raise ValueError("schedule time")
+            if type(schedule["duration"]) is not int or not 60<=schedule["duration"]<=79200:raise ValueError("duration")
+            days=schedule["days"]
+            if not isinstance(days,list) or not 1<=len(days)<=7 or any(type(d) is not int or not 0<=d<=6 for d in days) or len(set(days))!=len(days):raise ValueError("weekdays")
+            if not isinstance(schedule["timezone"],str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}',schedule["timezone"]):raise ValueError("timezone")
+        if spec["rule_type"]=="dns_override":
+            spec["address"]=canonical_rule_ip(spec["address"])
+        elif "address" in spec:raise ValueError("address only for DNS override")
+        target = spec["target"]
+        if spec["rule_type"] == "internet" and target != "internet":
+            raise ValueError("internet target")
+        if spec["rule_type"] == "category" and target not in ("games","social","av","porn","vpn"):
+            raise ValueError("category identifier")
+        if spec["rule_type"] == "app" and not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',target):
+            raise ValueError("app identifier")
+        if spec["rule_type"] == "ip":
+            spec["target"]=canonical_rule_ip(target)
+        if spec["rule_type"] in ("dns","dns_override") and (len(target)>253 or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?',part) for part in target.split("."))):
+            raise ValueError("domain")
+        if spec["rule_type"] in ("dns","dns_override"):
+            spec["target"]=target.lower()
+        if "schedule" in spec:
+            spec["schedule"]["days"]=sorted(spec["schedule"]["days"])
     return spec
 
 
@@ -1183,18 +1362,18 @@ def management_request(command, item, target, value, want_pid=False, lifecycle=F
 
 
 def management_guard(revision, kind=None, feature=None):
-    if kind in ("managed_forward","managed_forward_batch") and revision not in VPN_MANAGEMENT_REVISIONS:
+    if kind in ("managed_forward","managed_interface_forward","managed_forward_batch") and revision not in VPN_MANAGEMENT_REVISIONS:
         raise Unsupported("persistent forwarding requires its reviewed installed revision")
     if revision in VPN_MANAGEMENT_REVISIONS:
         if kind in ('managed_feature','managed_scoped') and feature not in POLICY_FEATURES:
             raise Unsupported('feature implementation not reviewed for installed revision')
         if kind in ('managed_feature','managed_scoped','managed_rule'):
             policy_source_guard(revision)
-        elif kind in ('managed_lifecycle','managed_vpn','managed_forward','managed_forward_batch'):
+        elif kind in ('managed_lifecycle','managed_vpn','managed_forward','managed_interface_forward','managed_forward_batch'):
             vpn_source_guard(revision)
         else:
             raise Unsupported('operation not reviewed for installed revision')
-        if kind in ('managed_forward','managed_forward_batch'):
+        if kind in ('managed_forward','managed_interface_forward','managed_forward_batch'):
             import hashlib
             for name,expected in FORWARD_SOURCE_HASHES.items():
                 if hashlib.sha256(contract_file('/home/pi/firewalla',name)).hexdigest()!=expected:raise Unsupported('port forwarding source changed')
@@ -1413,101 +1592,101 @@ def managed_lifecycle(args):
 
 
 def managed_write(args):
-    spec=validate_managed(args['spec'])
-    mode=args['mode']
-    if mode not in ('preview','apply','rollback'):
-        raise ValueError('managed mode')
-    if mode!='preview':require_action_deadline(args)
-    management_guard(args.get('revision'), spec['kind'], spec.get('feature'))
-    if spec['kind']=='managed_forward_batch':
+    spec=validate_managed(args["spec"])
+    mode=args["mode"]
+    if mode not in ("preview","apply","rollback"):
+        raise ValueError("managed mode")
+    if mode!="preview":require_action_deadline(args)
+    management_guard(args.get("revision"), spec["kind"], spec.get("feature"))
+    if spec["kind"]=="managed_forward_batch":
         return managed_forward_batch(args)
-    if spec['kind']=='managed_forward':
+    if spec["kind"] in ("managed_forward","managed_interface_forward"):
         return managed_forward(args)
-    if spec['kind']=='managed_lifecycle':
+    if spec["kind"]=="managed_lifecycle":
         return managed_lifecycle(args)
-    if spec['kind']=='managed_scoped':
-        if spec['scope']=='network':
-            exists=run(['redis-cli','--raw','EXISTS','network:uuid:'+spec['target']]).strip()=='1'
+    if spec["kind"]=="managed_scoped":
+        if spec["scope"]=="network":
+            exists=run(["redis-cli","--raw","EXISTS","network:uuid:"+spec["target"]]).strip()=="1"
         else:
-            exists=any(run(['redis-cli','--raw','EXISTS',prefix+spec['target']]).strip()=='1' for prefix in ('tag:uid:','deviceTag:uid:','userTag:uid:','ssidTag:uid:'))
-        if not exists:raise Unsupported('scope missing')
-        if spec['feature']=='ntp_redirect':
-            if run(['redis-cli','--raw','HGET','sys:features','ntp_redirect']).strip()!='1' or run(['redis-cli','--raw','GET','sys:ntp:status']).strip()!='1':
-                raise Unsupported('NTP service must already be enabled and healthy')
+            exists=any(run(["redis-cli","--raw","EXISTS",prefix+spec["target"]]).strip()=="1" for prefix in ("tag:uid:","deviceTag:uid:","userTag:uid:","ssidTag:uid:"))
+        if not exists:raise Unsupported("scope missing")
+        if spec["feature"]=="ntp_redirect":
+            if run(["redis-cli","--raw","HGET","sys:features","ntp_redirect"]).strip()!="1" or run(["redis-cli","--raw","GET","sys:ntp:status"]).strip()!="1":
+                raise Unsupported("NTP service must already be enabled and healthy")
     # Ensure exact device exists; no IP->MAC ambiguity or accidental global target.
-    if spec['kind']!='managed_scoped' and run(['redis-cli','--raw','EXISTS','host:mac:'+spec['device']]).strip()!='1':
-        raise Unsupported('device missing')
-    context=args.get('context')
-    if spec['kind']=='managed_vpn' and context is not None:
-        if (not isinstance(context,dict) or set(context)!={'before'} or
-                context['before']!={'state':True,'profileId':spec['expected_profile']}):
-            raise ValueError('VPN rollback context must restore the approved expected profile only')
+    if spec["kind"]!="managed_scoped" and run(["redis-cli","--raw","EXISTS","host:mac:"+spec["device"]]).strip()!="1":
+        raise Unsupported("device missing")
+    context=args.get("context")
+    if spec["kind"]=="managed_vpn" and context is not None:
+        if (not isinstance(context,dict) or set(context)!={"before"} or
+                context["before"]!={"state":True,"profileId":spec["expected_profile"]}):
+            raise ValueError("VPN rollback context must restore the approved expected profile only")
     state=managed_state(spec,context)
-    if mode=='preview':
-        if spec['kind']=='managed_vpn' and not context and state['field']['profileId']!=spec['expected_profile']:
-            raise Unsupported('expected VPN profile mismatch')
+    if mode=="preview":
+        if spec["kind"]=="managed_vpn" and not context and state["field"]["profileId"]!=spec["expected_profile"]:
+            raise Unsupported("expected VPN profile mismatch")
         return state
-    if args.get('expected')!=state['fingerprint']:
-        return {'outcome':'stale','changed':False}
+    if args.get("expected")!=state["fingerprint"]:
+        return {"outcome":"stale","changed":False}
     # All failures once a mutation is sent remain uncertain; never automatic retry.
     try:
         require_action_deadline(args)
-        if spec['kind']=='managed_rule':
-            if mode=='apply':
-                if state['present']:
-                    return {'outcome':'stale','changed':False}
+        if spec["kind"]=="managed_rule":
+            if mode=="apply":
+                if state["present"]:
+                    return {"outcome":"stale","changed":False}
                 value=managed_rule_value(spec)
                 # Upstream create can reactivate a duplicate disabled rule. Creating disabled
                 # first prevents that behavior even if a duplicate races the snapshot.
                 require_action_deadline(args)
-                pid=management_request('cmd','policy:create','0.0.0.0',{**value,'disabled':'1'},True)
-                context={'pid':pid,'before':None}
-                if pid in state['known_policy_ids']:
-                    raise Unsupported('creation returned pre-existing ID')
+                pid=management_request("cmd","policy:create","0.0.0.0",{**value,"disabled":"1"},True)
+                context={"pid":pid,"before":None}
+                if pid in state["known_policy_ids"]:
+                    raise Unsupported("creation returned pre-existing ID")
                 created=managed_state(spec,context)
-                if not managed_rule_matches(created['field'],value,spec,True):
-                    raise Unsupported('new disabled rule did not match approved specification')
+                if not managed_rule_matches(created["field"],value,spec,True):
+                    raise Unsupported("new disabled rule did not match approved specification")
                 try:
                     require_action_deadline(args)
                 except ValueError:
-                    return {'outcome':'partial_expired','changed':True,'context':context,
-                            'state':created,'disabled_rule_verified':True,
-                            'reason':'Deadline expired after verified disabled creation; no enable or cleanup dispatched. Inspect before a new plan.'}
-                management_request('cmd','policy:enable','0.0.0.0',{'policyID':pid})
+                    return {"outcome":"partial_expired","changed":True,"context":context,
+                            "state":created,"disabled_rule_verified":True,
+                            "reason":"Deadline expired after verified disabled creation; no enable or cleanup dispatched. Inspect before a new plan."}
+                management_request("cmd","policy:enable","0.0.0.0",{"policyID":pid})
             else:
-                if not context or not state['present']:
-                    return {'outcome':'stale','changed':False}
+                if not context or not state["present"]:
+                    return {"outcome":"stale","changed":False}
                 require_action_deadline(args)
-                management_request('cmd','policy:delete','0.0.0.0',{'policyID':context['pid']})
+                management_request("cmd","policy:delete","0.0.0.0",{"policyID":context["pid"]})
         else:
-            if mode=='apply':
-                context={'before':state['field']}
-                if spec['kind']=='managed_vpn':
-                    if state['field']['profileId']!=spec['expected_profile']:
-                        return {'outcome':'stale','changed':False}
-                    value={**state['field'],'profileId':spec['destination_profile']}
+            if mode=="apply":
+                context={"before":state["field"]}
+                if spec["kind"]=="managed_vpn":
+                    if state["field"]["profileId"]!=spec["expected_profile"]:
+                        return {"outcome":"stale","changed":False}
+                    value={**state["field"],"profileId":spec["destination_profile"]}
                 else:
-                    desired={'enable':True,'disable':None,'inherit':False}[spec['desired']]
-                    value=desired if spec['feature']=='adblock' else {'state':desired}
+                    desired={"enable":True,"disable":None,"inherit":False}[spec["desired"]]
+                    value=desired if spec["feature"]=="adblock" else {"state":desired}
             else:
-                if not context or 'before' not in context:
-                    raise Unsupported('rollback context')
-                value=context['before']
+                if not context or "before" not in context:
+                    raise Unsupported("rollback context")
+                value=context["before"]
             require_action_deadline(args)
-            management_request('set','policy',managed_target(spec),{managed_field(spec):value})
+            management_request("set","policy",managed_target(spec),{managed_field(spec):value})
         after=managed_state(spec,context)
-        if spec['kind']=='managed_rule':
-            verified=after['present'] if mode=='apply' else not after['present']
-            if mode=='apply' and verified:
-                verified=managed_rule_matches(after['field'],managed_rule_value(spec),spec,False)
+        if spec["kind"]=="managed_rule":
+            verified=after["present"] if mode=="apply" else not after["present"]
+            if mode=="apply" and verified:
+                verified=managed_rule_matches(after["field"],managed_rule_value(spec),spec,False)
         else:
-            verified=after['field']==value
-        return {'outcome':('applied' if mode=='apply' else 'rolled_back') if verified else 'uncertain',
-                'state':after,'context':context,'persistent_state_verified':verified,
-                'enforcement':'unverified_async','effective_device_path':'unverified',
-                'note':'Management acknowledgment and selected stored state only. Enforcement, DNS behavior and kill-switch behavior require independent tests; existing global/group/network rules still apply.'}
+            verified=after["field"]==value
+        return {"outcome":("applied" if mode=="apply" else "rolled_back") if verified else "uncertain",
+                "state":after,"context":context,"persistent_state_verified":verified,
+                "enforcement":"unverified_async","effective_device_path":"unverified",
+                "note":"Management acknowledgment and selected stored state only. Enforcement, DNS behavior and kill-switch behavior require independent tests; existing global/group/network rules still apply."}
     except Exception:
-        return {'outcome':'uncertain','context':context,'reason':'Management request or selected verification failed; a new rule may remain disabled. Inspect before any new attempt.'}
+        return {"outcome":"uncertain","context":context,"reason":"Management request or selected verification failed; a new rule may remain disabled. Inspect before any new attempt."}
 
 
 # Selected fields only: never HGETALL/init/getAttributes for these reads.
@@ -1550,9 +1729,9 @@ return cjson.encode({tags=tags,hosts=hosts,complete=complete})
 """
 
 def membership_snapshot():
-    result=json.loads(run(['redis-cli','--raw','EVAL',MEMBERSHIP_LUA,'0']))
+    result=json.loads(run(["redis-cli","--raw","EVAL",MEMBERSHIP_LUA,"0"]))
     # Redis cjson encodes empty Lua arrays as {}.
-    for key in ('tags','hosts'):
+    for key in ("tags","hosts"):
         if result.get(key)=={}: result[key]=[]
     return result
 
@@ -1628,51 +1807,53 @@ def wireguard_endpoints(config):
             'note':'Configured peer endpoints only, not current handshake or DNS resolvers.'}
 
 
-def saved_vpn_profiles(base='/home/pi/.firewalla/run'):
+def saved_vpn_profiles(base="/home/pi/.firewalla/run"):
     from pathlib import Path
     profiles=[]; inventory_complete=True
-    links=network('interfaces'); interfaces={r['ifname']:r for r in links['rows'] if 'ifname' in r}
-    for kind,directory,suffix in [('openvpn','ovpn_profile','.ovpn'),('wireguard','wg_profile','.settings')]:
+    links=network("interfaces"); interfaces={r["ifname"]:r for r in links["rows"] if "ifname" in r}
+    for kind,directory,suffix in [("openvpn","ovpn_profile",".ovpn"),("wireguard","wg_profile",".settings")]:
         folder=Path(base)/directory
         if not folder.exists(): continue
-        if folder.is_symlink() or not folder.is_dir(): raise Unsupported('profile directory schema')
+        if folder.is_symlink() or not folder.is_dir(): raise Unsupported("profile directory schema")
         entries=[]
         with os.scandir(folder) as scan:
             for entry in scan:
-                if len(entries)>=1024: raise Unsupported('directory bound')
+                if len(entries)>=1024: raise Unsupported("directory bound")
                 entries.append(entry.name)
         ids=sorted(name[:-len(suffix)] for name in entries if name.endswith(suffix))
-        if len(profiles)+len(ids)>128: raise Unsupported('profile limit')
+        if len(profiles)+len(ids)>128: raise Unsupported("profile limit")
         for identifier in ids:
-            if not re.fullmatch(r'[A-Za-z0-9_]{1,10}',identifier): raise Unsupported('profile ID schema')
-            name=None; metadata='ok'
+            if not re.fullmatch(r'[A-Za-z0-9_]{1,10}',identifier): raise Unsupported("profile ID schema")
+            name=None; metadata="ok"
             try:
-                settings=json.loads(safe_profile_file(folder/(identifier+'.settings'),32768))
-                name=rule_text(settings.get('displayName') or settings.get('serverBoxName'))
-            except FileNotFoundError: metadata='settings_missing'
-            endpoint_data={'configured_endpoints':[],'endpoints_complete':False}
+                settings=json.loads(safe_profile_file(folder/(identifier+".settings"),32768))
+                name=rule_text(settings.get("displayName") or settings.get("serverBoxName"))
+            except FileNotFoundError: metadata="settings_missing"
+            endpoint_data={"configured_endpoints":[],"endpoints_complete":False}
             try:
-                if kind=='openvpn': endpoint_data=openvpn_endpoints(safe_profile_file(folder/(identifier+'.ovpn')))
-                else: endpoint_data=wireguard_endpoints(json.loads(safe_profile_file(folder/(identifier+'.json'))))
+                if kind=="openvpn": endpoint_data=openvpn_endpoints(safe_profile_file(folder/(identifier+".ovpn")))
+                else: endpoint_data=wireguard_endpoints(json.loads(safe_profile_file(folder/(identifier+".json"))))
             except (ValueError,OSError,Unsupported,TypeError,AttributeError):
-                metadata='endpoint_metadata_unavailable'
-            intf='vpn_'+identifier
+                metadata="endpoint_metadata_unavailable"
+            intf="vpn_"+identifier
             observed=interfaces.get(intf)
-            raw=run(['redis-cli','--raw','GET','VC:'+identifier+':connState']).strip()
-            cached={'true':True,'false':False,'1':True,'0':False}.get(raw)
-            profiles.append({'profile_id':identifier,'name':name,'vpn_type':kind,'saved':True,
-                'interface':intf if observed else None,'interface_present':True if observed else None if links['truncated'] else False,
-                'interface_operstate':observed.get('operstate') if observed else None,
-                'cached_connected':cached,'administrative_state':'unknown','effective_device_routing':'unknown',
-                'metadata_status':metadata,**endpoint_data})
-    matched={'vpn_'+r['profile_id'] for r in profiles}
-    return {'profiles':profiles,'supported_types':['openvpn','wireguard'],'inventory_complete_for_supported_types':inventory_complete,
-            'interface_inventory_truncated':links['truncated'],
-            'unmatched_interfaces':[n for n in interfaces if re.match(r'^(vpn_|tun|tap|wg)',n) and n not in matched],
-            'note':'Names are configured labels; duplicate/missing names are preserved. Other VPN types are not inventoried. Cached connectivity/interface presence do not prove health, stopped intent, or device routing.'}
+            raw=run(["redis-cli","--raw","GET","VC:"+identifier+":connState"]).strip()
+            cached={"true":True,"false":False,"1":True,"0":False}.get(raw)
+            profiles.append({"profile_id":identifier,"name":name,"vpn_type":kind,"saved":True,
+                "interface":intf if observed else None,"interface_present":True if observed else None if links["truncated"] else False,
+                "interface_operstate":observed.get("operstate") if observed else None,
+                "cached_connected":cached,"administrative_state":"unknown","effective_device_routing":"unknown",
+                "metadata_status":metadata,**endpoint_data})
+    matched={"vpn_"+r["profile_id"] for r in profiles}
+    return {"profiles":profiles,"supported_types":["openvpn","wireguard"],"inventory_complete_for_supported_types":inventory_complete,
+            "interface_inventory_truncated":links["truncated"],
+            "unmatched_interfaces":[n for n in interfaces if re.match(r'^(vpn_|tun|tap|wg)',n) and n not in matched],
+            "note":"Names are configured labels; duplicate/missing names are preserved. Other VPN types are not inventoried. Cached connectivity/interface presence do not prove health, stopped intent, or device routing."}
 
 
 def dispatch(op, args):
+    if op == "forward_interfaces":
+        return {"interfaces":forward_networks(),"scope":"Only current WAN UUIDs are accepted for interface forwarding; LAN entries identify valid destinations"}
     if op == "managed_workflow_state": return workflow_state(args)
     if op == "membership_snapshot": return membership_snapshot()
     if op == "saved_vpn_profiles": return saved_vpn_profiles()
@@ -1902,10 +2083,16 @@ def dispatch(op, args):
 
 
 def execute(op, args):
+    global COMMAND_DEADLINE
+    previous=COMMAND_DEADLINE
+    seconds=108 if op=="managed_write" and args.get("spec",{}).get("kind") in ("managed_lifecycle","managed_forward_batch") else 18
+    COMMAND_DEADLINE=time.monotonic()+seconds
     try:
         return {"status": "ok", "data": dispatch(op, args)}
     except (Unsupported, ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired):
         return {"status": "unsupported", "reason": "Unavailable utility, permission, output/time limit, or unrecognized schema. No raw output returned."}
+    finally:
+        COMMAND_DEADLINE=previous
 
 if __name__ == "__main__":
     request = json.loads(sys.argv[1])

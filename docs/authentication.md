@@ -63,7 +63,7 @@ Choose token and session lifetimes through your gateway and identity-provider po
 
 ## Catalogs and write confirmation
 
-Default stdio/HTTP exposes 36 read/inspection tools. Optional VPN + capture uses `--vpn-write-catalog` and the corresponding configuration for 47 tools; `writes_enabled=false` excludes general writers. See [installation](install.md) for flags/mounts and [support](features.md) for firmware limits. A schema is not proof of a working adapter or an authorized operation.
+Default stdio/HTTP exposes 37 read/inspection tools. Optional VPN + capture uses `--vpn-write-catalog` and the corresponding configuration for 48 tools; `writes_enabled=false` excludes general writers. See [installation](install.md) for flags/mounts and [support](features.md) for firmware limits. A schema is not proof of a working adapter or an authorized operation.
 
 In [host-confirmed mode](approvals.md), the trusted authenticated MCP host shows the exact preview and obtains confirmation before apply. SSH stays internal; no external approval issuer is required. The server enforces plan/target/state/expiry/replay checks but does not independently attest a human reply. OAuth login alone does not enforce that conversational workflow. Only enable writes for clients whose confirmation behavior you trust and verify.
 

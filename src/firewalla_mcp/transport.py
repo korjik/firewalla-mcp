@@ -1,6 +1,8 @@
 import asyncio
 import json
 import shlex
+import time
+import math
 from pathlib import Path
 from .models import Site
 
@@ -9,7 +11,7 @@ MAX_OUTPUT = 131072
 
 def remote_command(operation: str, arguments: dict) -> str:
     source = Path(__file__).with_name("remote.py").read_text()
-    deadline = "110" if operation == "managed_write" and arguments.get("spec", {}).get("kind") == "managed_lifecycle" else "20"
+    deadline = "110" if operation == "managed_write" and arguments.get("spec", {}).get("kind") in ("managed_lifecycle", "managed_forward_batch") else "20"
     return shlex.join(["timeout", deadline, "python3", "-c", source,
                        json.dumps({"operation": operation, "arguments": arguments})])
 
@@ -27,14 +29,14 @@ def ssh_argv(site: Site, command: str) -> list[str]:
             "--", site.user+"@"+site.host, command]
 
 
-async def bounded_read(stream):
+async def bounded_read(stream, limit=MAX_OUTPUT):
     chunks, size = [], 0
     while True:
         part = await stream.read(8192)
         if not part:
             return b"".join(chunks)
         size += len(part)
-        if size > MAX_OUTPUT:
+        if size > limit:
             raise ValueError("output limit")
         chunks.append(part)
 
@@ -43,15 +45,18 @@ class SSHTransport:
     def __init__(self):
         self.limit = asyncio.Semaphore(4)
 
-    async def run(self, site: Site, operation: str, arguments: dict):
+    async def run(self, site: Site, operation: str, arguments: dict, *, dispatch_deadline=None):
         async with self.limit:
             proc = None
             try:
+                command=remote_command(operation, arguments)
+                if dispatch_deadline is not None and (type(dispatch_deadline) not in (int,float) or not math.isfinite(dispatch_deadline) or time.time()>=dispatch_deadline):
+                    return {"status":"unavailable","reason":"Diagnostic grant expired before SSH dispatch; no new request sent."}
                 proc = await asyncio.create_subprocess_exec(
-                    *ssh_argv(site, remote_command(operation, arguments)),
+                    *ssh_argv(site, command),
                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL)
-                deadline = 115 if operation == "managed_write" and arguments.get("spec", {}).get("kind") == "managed_lifecycle" else 25
+                deadline = 115 if operation == "managed_write" and arguments.get("spec", {}).get("kind") in ("managed_lifecycle", "managed_forward_batch") else 25
                 async with asyncio.timeout(deadline):
                     raw = await bounded_read(proc.stdout)
                     code = await proc.wait()

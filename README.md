@@ -27,7 +27,7 @@ This unofficial community project connects directly to your Firewalla appliances
 | Traffic and alarms | Bounded per-device flow queries, page summaries, active alarm samples/counts and interface counters |
 | Connection diagnosis | DNS lookups, allowlisted TCP tests and port-forward diagnosis that distinguishes configured mappings from external reachability |
 | Optional capture | Preview, start, status and cancel; explicit scope; at most **15 seconds / 100 packets**, metadata only |
-| Optional writes | VPN lifecycle, device VPN switching and registered inactive profile imports; source-supported rules, controls, DNS answers, VPN forwarding and compound plans |
+| Optional writes | VPN lifecycle, device VPN switching and registered inactive profile imports; source-supported rules, controls, DNS answers, persistent WAN/interface and VPN forwarding, separate [device-wide IPv6 policies](docs/ipv6-policies.md), and compound plans |
 
 **Availability depends on configuration and firmware.** Default startup exposes inspection tools, not executable writes. DNS/TCP diagnostics still generate network traffic; read-only does not mean passive. Some write adapters are source-supported candidates rather than deployed or live-enforcement-tested features. The [support matrix](docs/features.md) records that distinction; the [complete tool reference](docs/tool-reference.md) lists every tool, argument and limit.
 
@@ -70,10 +70,10 @@ Start with Firewalla’s official [how to enable and access SSH](https://help.fi
 
 ### 2. Get the source and configure your boxes
 
-The current implementation is on the review branch linked in [PR #1](https://github.com/korjik/firewalla-mcp/pull/1):
+Clone the repository, then select the reviewed release or feature branch you intend to run:
 
 ```sh
-git clone --branch codex/ssh-diagnostics https://github.com/korjik/firewalla-mcp.git
+git clone https://github.com/korjik/firewalla-mcp.git
 cd firewalla-mcp
 cp examples/config.json config.json
 ```
@@ -152,6 +152,7 @@ HTTP serves MCP at `/mcp` and requires a protected bearer-token file plus allowe
 - “Which devices are explicitly assigned to Alex? Keep possible device-name matches separate.”
 - “List saved VPN profiles on router-b with their names, types and configured server endpoints. Distinguish observed connectivity from unknown health.”
 - “Summarize this device's recent flows in a bounded time window. Show top destinations and explain any missing history.”
+- “Preview a persistent TCP forward on the selected WAN to this device, then wait for my confirmation.”
 - “Diagnose why this forwarded TCP port is unreachable. Separate the listening service, VPN path, mapping and independent external test.”
 - With writes enabled: “Preview switching this device from profile_a to profile_b, preserving strict VPN and DNS settings. Wait for my confirmation.”
 - With capture enabled: “Preview a ten-second capture for this device and TCP port on the selected VPN interface. Show the scope before starting.”
@@ -185,7 +186,7 @@ Capture has its own scope confirmation and strict limits. It returns timestamps,
 
 The Docker host and router architectures are independent. The amd64 container build/runtime was tested; ARM container execution is unverified. Both checked routers provide iptables and lack nft. No blanket compatibility, real capture acceptance test or reboot-persistence/enforcement certification is claimed.
 
-The default catalog has 36 inspection tools; opt-in VPN, VPN + capture and combined write + capture configurations expose 43, 47 and 61 respectively. These counts describe registration, not authorization or live validation. A running server may expose a smaller catalog than the source; general managed-write adapters still require live enforcement validation. Consult the [support matrix](docs/features.md) and [validation record](docs/development/validation.md) before enabling a feature.
+The default catalog has 37 inspection tools; opt-in VPN, VPN + capture and combined write + capture configurations expose 44, 48 and 64 respectively. These counts describe registration, not authorization or live validation. A running server may expose a smaller catalog than the source; general managed-write adapters still require live enforcement validation. Consult the [support matrix](docs/features.md) and [validation record](docs/development/validation.md) before enabling a feature.
 
 ## Documentation
 
@@ -201,7 +202,8 @@ The default catalog has 36 inspection tools; opt-in VPN, VPN + capture and combi
 | [Write setup](docs/writes.md) | Enablement, drift/replay checks and partial failures |
 | [Managed controls](docs/managed-writes.md) | Device/app/DNS operations and firmware restrictions |
 | [VPN operations](docs/vpn-mcp-writes.md) | Lifecycle, device switching and router-local inactive import |
-| [VPN forwarding and plans](docs/persistent-forwarding.md) | Persistent mappings, compound plans and verification limits |
+| [Persistent forwarding and plans](docs/persistent-forwarding.md) | Persistent mappings, compound plans and verification limits |
+| [Complete WAN forwarding lifecycle](docs/forwarding-lifecycle.md) | Opt-in NAT plus scoped IPv4 ingress, exact removals and durable recovery |
 | [Traffic capture](docs/traffic-capture.md) | Scope, metadata, limits and cleanup |
 | [Troubleshooting](docs/troubleshooting.md) | Startup, access and diagnostic issues |
 | [Security](SECURITY.md) | Trust boundaries and vulnerability reporting |

@@ -1,0 +1,5 @@
+# Disposable contract tests only; never deploy this image to a router.
+ARG KERNEL_IMAGE=firewalla-mcp:kernel-test
+FROM ${KERNEL_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends ipset redis-server && rm -rf /var/lib/apt/lists/*

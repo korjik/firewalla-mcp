@@ -14,7 +14,7 @@ import sys
 READ_DIGEST = 'REPLACE_WITH_REVIEWED_REMOTE_SHA256'
 IMPORT_DIGEST = 'REPLACE_WITH_REVIEWED_IMPORT_SHA256'
 CAPTURE_DIGEST = 'REPLACE_WITH_REVIEWED_CAPTURE_SHA256'
-ALLOWED = frozenset('membership_snapshot saved_vpn_profiles service_features control_state app_catalog control_rules device_flows alarm_summaries policy_summaries flow_sample services inventory device_policy vpn_interfaces traffic alarm_count dns_config conntrack capabilities health network device vpn mappings firewall ipsets connections tcp dns'.split())
+ALLOWED = frozenset('forward_interfaces membership_snapshot saved_vpn_profiles service_features control_state app_catalog control_rules device_flows alarm_summaries policy_summaries flow_sample services inventory device_policy vpn_interfaces traffic alarm_count dns_config conntrack capabilities health network device vpn mappings firewall ipsets connections tcp dns'.split())
 
 
 def validated(command, read_digest=READ_DIGEST, import_digest=IMPORT_DIGEST, import_path=None, capture_digest=CAPTURE_DIGEST):

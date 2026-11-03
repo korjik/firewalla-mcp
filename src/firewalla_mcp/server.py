@@ -5,7 +5,7 @@ from typing import Literal, Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import TypeAdapter
-from .models import Config, Name, BoxName, Port, Mac, ForwardAction
+from .models import Config, Name, BoxName, Port, Mac, ForwardAction, LifecycleAction, LifecycleRemoval, ForwardMetadataChange, AppMappingSelection, AppPolicySelection, AppRecreateAction, IPv6PolicyAction, IPv6PolicyRemoval
 from .transport import SSHTransport
 from .writes import WriteManager
 from .analysis import summarize_page
@@ -36,6 +36,176 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
     if not vpn_write_catalog and config.writes_enabled and config.vpn_writes_enabled:
         from .vpn_import_mcp import ImportManager
         imports = ImportManager(config, import_transport)
+
+    grants=None
+    if config.diagnostic_grants_enabled:
+        if readonly_catalog or vpn_write_catalog:raise ValueError("Diagnostic grants require general catalog")
+        from .probe_grants import ProbeGrants
+        grants=ProbeGrants(writes)
+
+        @mcp.tool(annotations=READ)
+        async def preview_diagnostic_grant(box_name: BoxName, address: str, ports: list[Port], ttl_seconds: int = 600) -> dict[str, Any]:
+            """Preview an exact source-box/literal-IPv4/TCP-port diagnostic grant.
+            One to eight ports, 60–3600 seconds, at most 16 handshakes. No DNS names,
+            subnets, payloads or probes. Show scope/expiry and obtain explicit owner
+            confirmation before apply_diagnostic_grant_plan. Host enforces consent.
+            """
+            return grants.preview_grant(box_name,address,ports,ttl_seconds)
+
+        @mcp.tool(annotations=READ)
+        async def preview_diagnostic_revoke(grant_id: str) -> dict[str, Any]:
+            """Preview revoking one additional diagnostic grant. Does not revoke legacy probe_networks permissions or other grants. Confirm before apply."""
+            return grants.preview_revoke(grant_id)
+
+        @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=False))
+        async def apply_diagnostic_grant_plan(plan_id: str) -> dict[str, Any]:
+            """Apply an exact grant/revoke preview only after explicit owner confirmation through the trusted host. Persists diagnostic permissions, not router rules. No probe runs. Exact state, expiry and replay guards apply."""
+            return grants.apply(plan_id)
+
+        @mcp.tool(annotations=READ)
+        async def diagnostic_grants() -> dict[str, Any]:
+            """Read private exact diagnostic grants, usage, revocation and expiry. No probes."""
+            return grants.inventory()
+
+    if config.forwarding_lifecycle_enabled:
+        if readonly_catalog or vpn_write_catalog:raise ValueError("Forwarding lifecycle requires the general catalog")
+        from .forward_manager import ForwardManager
+        forwarding=ForwardManager(writes)
+
+        @mcp.tool(annotations=READ)
+        async def inspect_forwarding_lifecycle(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, maintenance_until: int) -> dict[str, Any]:
+            """Read exact mapping/policy identities and fingerprints for a scoped WAN lifecycle.
+            No rules change. This metadata is private. Missing/inherited policy evidence
+            is not proof of absence. Use exact selections in a fresh preview; never
+            delete objects merely because they have an MCP label or a lost plan ID.
+            """
+            return await forwarding.inspect(box_name,device,destination_ip,interface_uuid,maintenance_until)
+
+        @mcp.tool(annotations=READ)
+        async def preview_forwarding_lifecycle(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, actions: list[LifecycleAction], removals: list[LifecycleRemoval],
+                maintenance_until: int) -> dict[str, Any]:
+            """Preview up to four TCP WAN forwards and scoped IPv4 inbound allows as one plan.
+            Each action requires protocol=tcp, external_port, destination_port and
+            source_network (explicit IPv4 CIDR). Removals require exact inventory key
+            and fingerprint. Preserve equivalent NAT where possible; unrelated objects
+            remain untouched. Allows cover matching routed/other-mapping IPv4 traffic
+            through the selected WAN/device/ports; no exact original-IP or DNAT-only
+            constraint. IPv6 sources are excluded and verified. Native changes are not
+            atomic. Show all ordered steps, exposure and partial-failure risks and obtain
+            explicit confirmation before apply_forwarding_lifecycle. SSH is internal.
+            """
+            return await forwarding.preview(box_name,device,destination_ip,interface_uuid,[a.model_dump() for a in actions],[r.model_dump() for r in removals],maintenance_until)
+
+        @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=True))
+        async def apply_forwarding_lifecycle(plan_id: str) -> dict[str, Any]:
+            """Execute only the exact lifecycle preview after explicit user confirmation.
+            The trusted host enforces confirmation; the server binds state, target,
+            expiry and single use. Stop on drift/uncertainty, with durable per-step
+            recovery. Never claim external reachability from stored or kernel state.
+            """
+            return await forwarding.apply(plan_id)
+
+        @mcp.tool(annotations=READ)
+        async def preview_forwarding_metadata(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, changes: list[ForwardMetadataChange], maintenance_until: int) -> dict[str, Any]:
+            """Preview one or two exact HTTP/HTTPS mapping metadata changes.
+            Select keys/fingerprints from inspect_forwarding_lifecycle. Explicitly
+            choose display_name and remove_default_type separately; renaming does
+            not authorize type removal. Private durable receipts preserve ownership
+            independently of labels. Native remove/recreate briefly interrupts each
+            selected port; failure can prolong it. Policies and other fields remain
+            unchanged. Show ordered changes and risks, obtain exact host confirmation,
+            then call apply_forwarding_lifecycle. Recovery survives restarts and
+            requires fresh preview/confirmation. No probes or app-visibility guarantee.
+            """
+            return await forwarding.preview_metadata(box_name,device,destination_ip,interface_uuid,[c.model_dump() for c in changes],maintenance_until)
+
+        @mcp.tool(annotations=READ)
+        async def preview_forwarding_recovery(transaction_id: str, rollback: bool,
+                maintenance_until: int) -> dict[str, Any]:
+            """Inspect durable lifecycle progress after restart and preview continuation or rollback.
+            Requires exact current objects, native identity and enforcement proof.
+            Never automatically retry uncertain writes or reuse prior consent. Show
+            this new plan and obtain fresh confirmation before applying. Changed or
+            ambiguous state blocks recovery; do not clear journals or execution ledger.
+            """
+            return await forwarding.recover(transaction_id,rollback,maintenance_until)
+
+    if config.forwarding_app_management_enabled:
+        @mcp.tool(annotations=READ)
+        async def inspect_forwarding_app_objects(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, maintenance_until: int) -> dict[str,Any]:
+            """Inspect exact app/MCP NAT objects and eligible explicit inbound allow candidates.
+            Returns IDs, birth and semantic fingerprints; matching ports are not consent.
+            Legacy Internet allows can cover IPv4 and IPv6/direct routed access. Global,
+            inherited, shared or unreviewed policies are not automatically selected.
+            """
+            return await forwarding.inspect_app_objects(box_name,device,destination_ip,interface_uuid,maintenance_until)
+
+        @mcp.tool(annotations=READ)
+        async def preview_forwarding_reset(box_name: BoxName, device: Mac, destination_ip: str,
+                interface_uuid: str, mappings: list[AppMappingSelection], policies: list[AppPolicySelection],
+                recreate: list[AppRecreateAction], all_mappings: bool, maintenance_until: int) -> dict[str,Any]:
+            """Preview exact owner-selected NAT and allow removals and named IPv4 recreation.
+            At most eight selected mappings/policies, four new forwards, 32 ordered steps.
+            all_mappings requires an exact complete inventory, never discovers extra deletions.
+            App selection is explicit adoption, not ownership inferred from labels. Old legacy
+            allows may be dual-stack; recreated forwards are IPv4 DNAT with scoped IPv4 allows.
+            No NAT66. Show every removal/creation and outage/partial-failure risk; get one
+            explicit confirmation, then apply_forwarding_lifecycle. Expiry/drift stops execution;
+            recovery after restart requires fresh confirmation and may allocate new policy IDs.
+            """
+            actions=[{k:v for k,v in a.model_dump().items() if k!='address_family'} for a in recreate]
+            return await forwarding.preview_app_reset(box_name,device,destination_ip,interface_uuid,
+                [m.model_dump() for m in mappings],[p.model_dump() for p in policies],actions,all_mappings,maintenance_until)
+
+    if config.ipv6_policy_enabled:
+        from .ipv6_manager import IPv6Manager
+        from .ipv6_transport import IPv6SSH
+        ipv6 = IPv6Manager(writes,IPv6SSH)
+
+        @mcp.tool(annotations=READ)
+        async def inspect_ipv6_policies(box_name: BoxName, device: Mac, interface_uuid: str,
+                maintenance_until: int) -> dict[str,Any]:
+            """Inspect owned device-wide IPv6 inbound policies and current device/WAN bindings.
+            No NAT, probe or mutation. Other policies remain opaque and preserved.
+            Ownership requires verified private transaction receipts, never a matching label.
+            """
+            return await ipv6.inspect(box_name,device,interface_uuid,maintenance_until)
+
+        @mcp.tool(annotations=READ)
+        async def preview_ipv6_policy_plan(box_name: BoxName, device: Mac, interface_uuid: str,
+                actions: list[IPv6PolicyAction], removals: list[IPv6PolicyRemoval],
+                maintenance_until: int) -> dict[str,Any]:
+            """Preview up to four explicit IPv6 policy creations and four exact owned removals.
+            Each allow covers all IPv6 addresses of the selected device, including future
+            addresses, on one WAN from an explicit IPv6 CIDR to one TCP/UDP port. No IPv4
+            permission, NAT66, port translation or exact single-address pinhole. Show all
+            scope/ordered steps and outage/partial-failure risks; obtain explicit human
+            confirmation through the trusted host before apply. Five-minute maximum window.
+            """
+            return await ipv6.preview(box_name,device,interface_uuid,[a.model_dump() for a in actions],
+                [r.model_dump() for r in removals],maintenance_until)
+
+        @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=True,idempotentHint=False,openWorldHint=False))
+        async def apply_ipv6_policy_plan(plan_id: str) -> dict[str,Any]:
+            """Apply only the exact IPv6 policy preview explicitly confirmed by the user.
+            The authenticated host enforces human confirmation; the server binds scope,
+            prior state, expiry and one-time execution. SSH remains internal. Stop on partial
+            or uncertain outcome; do not retry blindly. Rule proof is not external reachability.
+            """
+            return await ipv6.apply(plan_id)
+
+        @mcp.tool(annotations=READ)
+        async def preview_ipv6_policy_recovery(transaction_id: str, rollback: bool,
+                maintenance_until: int) -> dict[str,Any]:
+            """Preview conditional recovery of a private recorded IPv6 transaction after restart.
+            Fresh confirmation is required before apply. Preserve concurrent changes; unknown
+            allocations require inspection. Restoring a policy may allocate a new native ID.
+            """
+            return await ipv6.recover(transaction_id,rollback,maintenance_until)
 
     if config.capture_enabled:
         from .capture import CaptureManager
@@ -190,8 +360,14 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
 
     @mcp.tool(annotations=READ)
     async def port_forward_mappings(box_name: BoxName) -> dict[str, Any]:
-        """Read sanitized configured forwarding intent; not effective kernel mappings."""
-        return await read(box_name, "mappings")
+        """List saved NAT mappings, not firewall allow rules or proof a service is reachable.
+        Check kernel translation, applicable inbound policy, listener/return path and
+        an independent external connection separately. Never add a duplicate mapping
+        just because an external probe fails. No changes performed.
+        """
+        from .forwarding_guidance import guidance
+        result=await read(box_name, "mappings")
+        return {**result,"forwarding_guidance":guidance(phase="inventory")}
 
     @mcp.tool(annotations=READ)
     async def firewall_counters(box_name: BoxName, table: Literal["filter", "nat", "mangle"] = "filter") -> dict[str, Any]:
@@ -218,10 +394,13 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
 
     @mcp.tool(annotations=READ)
     async def tcp_probe(box_name: BoxName, address: str, port: Port) -> dict[str, Any]:
-        """Attempt one TCP handshake to a configured allowed IP; no payload sent."""
+        """Attempt one TCP handshake; no payload. Legacy probe_networks authorizes its existing IP scope; otherwise an active exact source/IP/port diagnostic grant is required when configured."""
         box(box_name)
         TypeAdapter(Port).validate_python(port)
-        address = config.target(box_name, address)
+        try:address = config.target(box_name, address)
+        except ValueError:
+            if grants is None:raise
+            return await grants.probe(box_name,address,port)
         return await read(box_name, "tcp", address=address, port=port)
 
     @mcp.tool(annotations=READ)
@@ -458,15 +637,21 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
                 "management_revisions_supported":list(__import__("firewalla_mcp.remote",fromlist=["VPN_MANAGEMENT_REVISIONS"]).VPN_MANAGEMENT_REVISIONS)}
         return {"configured_contracts":contracts,"enabled": config.writes_enabled and not readonly_catalog,
                 "catalog_mode":"read_only" if readonly_catalog else "full",
+                "forwarding_lifecycle_enabled":config.forwarding_lifecycle_enabled,
+                "forwarding_app_management_enabled":config.forwarding_app_management_enabled,
+                "ipv6_policy_enabled":config.ipv6_policy_enabled,
+                "ipv6_policy_scope":"Opt-in device-wide IPv6 inbound policies, including future device addresses; no NAT66 or exact address pinholes",
+                "forwarding_families":{"new_dnat":["ipv4"],"new_transports":["tcp","udp"],"new_ipv6_pinhole":config.ipv6_policy_enabled,"nat66":False,"legacy_restore":"Selected exact dual-stack device allows; requires both-family proof"},
+                "diagnostic_grants_enabled":config.diagnostic_grants_enabled,
                 "confirmation_mode":config.write_confirmation_mode,
                 "approval_workflow":writes.approval_next_step() if config.writes_enabled else None,
                 "executable_write_tools_exposed":not readonly_catalog,
                 "live_writes_available":None if config.writes_enabled and not readonly_catalog else False,
                 "stage_tools":"Non-executable proposals only; never issue apply tokens",
-                "implemented_in_source_not_deployment_validation": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions", "persistent IPv4 VPN NAT single mapping or 2–4 ordered same-target mappings; current source pins, mock-tested only", "revision-pinned device/group/network tri-state controls, scheduled app/category blocks, DNS answer rules, device VPN switches and profile lifecycle"],
+                "implemented_in_source_not_deployment_validation": ["temporary IPv4 route addition in allowed nonreserved tables", "temporary IPv4 filter rule append in allowed existing chains", "temporary IPv4 DNAT append in allowed existing chains", "approved rollback of verified additions", "persistent IPv4 WAN-interface or VPN NAT single mapping or 2–4 ordered same-target mappings; current source pins, mock-tested only", "revision-pinned device/group/network tri-state controls, scheduled app/category blocks, DNS answer rules, device VPN switches and profile lifecycle"],
                 "approval": "Source write adapters require separate opt-in, version/scope checks and one-time approval; their presence does not establish live compatibility or availability",
                 "deployment_validation":"Read-only tools tested; no live write enforcement or rollback validation claimed",
-                "unsupported": ["persistent Firewalla routes; IPv6/general WAN/DMZ forwarding; arbitrary mixed/cross-plugin plans", "global policies, arbitrary existing rule updates, user time quotas", "profile import without its dedicated opt-in and registered input", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
+                "unsupported": ["persistent Firewalla routes; NAT66/exact-address IPv6 pinholes/DMZ forwarding, all-WAN wildcard creation and arbitrary LAN ingress; arbitrary mixed/cross-plugin plans", "global policies, arbitrary existing rule updates, user time quotas", "profile import without its dedicated opt-in and registered input", "service restart/reboot/update", "arbitrary shell", "development HTTP routes"]}
 
     @mcp.tool(annotations=READ)
     async def preview_scheduled_block_rule(box_name: BoxName,device: Mac,
@@ -568,6 +753,52 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         return await workflows.apply_workflow(plan_id)
 
     @mcp.tool(annotations=READ)
+    async def forwarding_interfaces(box_name: BoxName) -> dict[str, Any]:
+        """List current Firewalla network UUIDs, names, types and IPv4 subnets.
+        Select a WAN UUID for persistent interface forwarding. LAN entries identify
+        eligible destination networks. Bounded to 64 network records; no secrets.
+        """
+        return await read(box_name, "forward_interfaces")
+
+    @mcp.tool(annotations=READ)
+    async def preview_persistent_forward(box_name: BoxName, device: Mac, destination_ip: str,
+            interface_uuid: str, protocol: Literal["tcp","udp"], external_port: Port,
+            destination_port: Port, maintenance_until: int) -> dict[str, Any]:
+        """Preview a persistent IPv4 mapping for one current WAN network UUID.
+        Uses FireMain stored configuration, never temporary iptables-only changes.
+        Scope is the WAN destination-address set including hairpin, not physical
+        ingress-only filtering. Requires observed LAN device/IP binding, no conflict,
+        and a maintenance window with no concurrent mapping edits (up to ten minutes).
+        Creates NAT only. Separate inbound firewall permission may be needed; inspect
+        applicable policies before proposing an exact separately confirmed allow.
+        Does not add firewall allows, change routing or prove external reachability.
+        Show exact preview, obtain host confirmation, then call apply_change.
+        """
+        import secrets,time
+        if type(maintenance_until) is not int or not time.time()<maintenance_until<=time.time()+600:
+            raise ValueError("Explicit maintenance deadline within ten minutes required")
+        return await writes.preview(config.resolve(box_name),dict(kind="managed_interface_forward",
+            device=device.upper(),destination_ip=destination_ip,interface_uuid=interface_uuid,
+            protocol=protocol,external_port=external_port,destination_port=destination_port,
+            maintenance_until=maintenance_until,owner_token=secrets.token_hex(16)))
+
+    @mcp.tool(annotations=READ)
+    async def preview_interface_forward_plan(box_name: BoxName, device: Mac, destination_ip: str,
+            interface_uuid: str, actions: list[ForwardAction], maintenance_until: int) -> dict[str, Any]:
+        """Preview 2–4 ordered persistent mappings on the same WAN UUID/device.
+        One exact host confirmation covers the immutable batch; apply_change executes
+        internal SSH. Stops on uncertainty or unrelated drift. Not atomic; no automatic
+        rollback/resume. Same destination-address scope and limits as single forwarding.
+        """
+        import secrets,time
+        if not 2<=len(actions)<=4 or type(maintenance_until) is not int or not time.time()<maintenance_until<=time.time()+600:
+            raise ValueError("Bounded actions and maintenance window required")
+        steps=[dict(kind="managed_interface_forward",device=device.upper(),destination_ip=destination_ip,
+                    interface_uuid=interface_uuid,**action.model_dump(),maintenance_until=maintenance_until,
+                    owner_token=secrets.token_hex(16)) for action in actions]
+        return await writes.preview(config.resolve(box_name),dict(kind="managed_forward_batch",steps=steps))
+
+    @mcp.tool(annotations=READ)
     async def preview_forward_plan(box_name: BoxName, device: Mac, destination_ip: str,
             profile: Name, actions: list[ForwardAction], maintenance_until: int) -> dict[str, Any]:
         """Preview 2–4 ordered persistent mappings for one device/VPN, one confirmation.
@@ -575,6 +806,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         stop on an unverified step; no blind rollback or resume. Earlier verified
         mapping additions are accounted for without accepting unrelated state drift.
         VPN start/switch and external-app steps are not part of this bounded plan.
+        NAT only: inbound policy permission and external reachability are separate checks.
         Confirm the entire plan then apply_change; SSH stays internal.
         """
         import time,secrets
@@ -620,6 +852,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
                                     action: Literal["ACCEPT", "DROP", "REJECT"]) -> dict[str, Any]:
         """Preview one temporary IPv4 filter rule appended to an allowed existing chain.
         This is kernel state, not a Firewalla app rule. May affect connectivity.
+        An ACCEPT filter does not create a NAT/port-forward mapping or prove external reachability.
         """
         return await writes.preview(box_name,{"kind":"filter_rule","chain":chain,"source":source,
             "destination":destination,"protocol":protocol,"destination_port":destination_port,"action":action})
@@ -642,6 +875,9 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
         MCP host, then call this tool directly. SSH remains internal; no issuer file.
         Approval is single-use, expires after 10 minutes, and must match the preview digest.
         Stale/uncertain states are never automatically retried. May disrupt networking.
+        For forwarding, applied means NAT operation completion only. Report the
+        structured verification levels; firewall permission and independent external
+        reachability remain separate. Never silently add companion allow policies.
         """
         return await writes.apply(plan_id)
 
@@ -704,7 +940,7 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             return await writes.rollback_preview(plan_id)
 
     if readonly_catalog or vpn_write_catalog:
-        for name in ("preview_network_plan","apply_network_plan","preview_forward_plan","preview_persistent_vpn_forward","apply_change","preview_route_change","preview_firewall_rule","preview_port_forward","preview_rollback","preview_managed_device_control","preview_managed_block_rule","preview_managed_vpn_switch","preview_scheduled_block_rule","preview_dns_override","preview_scoped_service_control","preview_vpn_lifecycle"):
+        for name in ("preview_persistent_forward","preview_interface_forward_plan","preview_network_plan","apply_network_plan","preview_forward_plan","preview_persistent_vpn_forward","apply_change","preview_route_change","preview_firewall_rule","preview_port_forward","preview_rollback","preview_managed_device_control","preview_managed_block_rule","preview_managed_vpn_switch","preview_scheduled_block_rule","preview_dns_override","preview_scoped_service_control","preview_vpn_lifecycle"):
             if vpn_write_catalog and name in ("preview_vpn_lifecycle","preview_managed_vpn_switch"):
                 continue
             mcp.remove_tool(name)

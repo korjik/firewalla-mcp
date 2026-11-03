@@ -1,4 +1,5 @@
 """Host-approved, temporary kernel changes. No MCP tool can issue an approval."""
+from .forwarding_guidance import KINDS as FORWARD_KINDS, guidance as forwarding_guidance
 import asyncio
 import copy
 import hashlib
@@ -20,6 +21,8 @@ class WriteManager:
         self.config=config
         self.transport=transport
         self.plans={}
+        from .forward_receipts import ForwardReceipts
+        self.forward_receipts=ForwardReceipts(config.forwarding_recovery_directory)
         self.locks={name:asyncio.Lock() for name in config.sites}
 
     def approval_bound_targets(self):
@@ -65,7 +68,7 @@ class WriteManager:
         if kind.startswith("managed_"):
             from .remote import validate_managed, MANAGEMENT_REVISION, VPN_MANAGEMENT_REVISIONS, POLICY_FEATURES
             validate_managed(spec)
-            if site.management_revision != MANAGEMENT_REVISION and not (kind in ("managed_lifecycle","managed_vpn","managed_forward","managed_forward_batch","managed_feature","managed_rule","managed_scoped") and site.management_revision in VPN_MANAGEMENT_REVISIONS):
+            if site.management_revision != MANAGEMENT_REVISION and not (kind in ("managed_lifecycle","managed_vpn","managed_forward","managed_interface_forward","managed_forward_batch","managed_feature","managed_rule","managed_scoped") and site.management_revision in VPN_MANAGEMENT_REVISIONS):
                 raise ValueError("Explicit reviewed management revision required")
             if site.management_revision in VPN_MANAGEMENT_REVISIONS and kind in ("managed_feature","managed_scoped") and spec["feature"] not in POLICY_FEATURES:
                 raise ValueError("Feature implementation not reviewed for installed revision")
@@ -73,7 +76,7 @@ class WriteManager:
                 from .remote import managed_target
                 if not self.approval_bound_targets() and managed_target(spec) not in site.managed_scopes:raise ValueError("Scope outside managed allowlist")
                 return site
-            if kind in ("managed_forward","managed_forward_batch"):
+            if kind in ("managed_forward","managed_interface_forward","managed_forward_batch"):
                 if not self.host_confirmed():raise ValueError("Persistent forward requires explicit host-confirmed mode")
                 if site.management_revision not in VPN_MANAGEMENT_REVISIONS:raise ValueError("Persistent forward requires reviewed installed revision")
                 return site
@@ -140,6 +143,8 @@ class WriteManager:
               "mode":mode,"expires_at":now+600,"scope":"vpn_runtime_lifecycle" if spec["kind"]=="managed_lifecycle" else "persistent_managed" if spec["kind"].startswith("managed_") else "temporary_kernel_only"}
         if context is not None:
             plan["context"]=context
+        if spec["kind"] in FORWARD_KINDS:
+            plan["forwarding_guidance"]=forwarding_guidance(spec)
         plan["site_binding"]=self.site_binding(box)
         plan["target_authorization"]="trusted_mcp_host_confirmation"
         plan["digest"]=digest(plan)
@@ -170,7 +175,11 @@ class WriteManager:
             if self.site_binding(box)!=binding:
                 raise ValueError("Box configuration changed during preview")
             state=result["data"]
+            if state.get("conflict"):
+                return {"status":"conflict","reason":"Potential forwarding overlap; no plan created and no mapping changed.","evidence":copy.deepcopy(state.get("conflict_details",{}))}
             if state["present"]:
+                if spec["kind"].startswith("managed_") and "forward" in spec["kind"]:
+                    return {"status":"no_change","reason":"Exact enabled configured mapping already exists; enforcement and external reachability are not proven.","forwarding_guidance":forwarding_guidance(spec,phase="existing")}
                 return {"status":"no_change","reason":"Desired state or potentially duplicate rule already exists; no replacement is permitted."}
             return self.new_plan(box,spec,state,"apply")
 
@@ -195,10 +204,14 @@ class WriteManager:
                 raise ValueError("Plan expired; preview again")
             self.check_plan(plan)
             site=self.validate(plan["box"],plan["spec"]).model_copy(deep=True)
+            durable=plan["spec"]["kind"] in ("managed_forward","managed_interface_forward") and self.config.forwarding_recovery_directory is not None
+            if durable:self.forward_receipts.save(plan,"started")
             self.consume_approval(plan)
             self.audit(plan_id,"host_requested_attempt",plan["box"])
             plan["status"]="uncertain" # Cancellation/transport failure never permits automatic retry.
             result=await self.remote_write(site,plan["spec"],plan["mode"],plan["expected"],plan.get("context"),plan["expires_at"])
+            if plan["spec"]["kind"] in FORWARD_KINDS:
+                result={**result,"forwarding_guidance":forwarding_guidance(plan["spec"],result,phase="apply")}
             plan["result"]=result
             outcome=result.get("data",{}).get("outcome","uncertain")
             plan["status"]=outcome
@@ -207,18 +220,31 @@ class WriteManager:
             except OSError:
                 result={**result,"audit_warning":"After-state audit failed; do not retry mutation"}
                 plan["result"]=result
+            if durable:
+                try:self.forward_receipts.save(plan,"completed")
+                except (OSError,ValueError):
+                    result={**result,"recovery_warning":"Completion receipt not persisted; inspect started receipt and current state, never retry automatically"}
             return result
 
     async def rollback_preview(self,plan_id):
         self.enabled()
-        if plan_id not in self.plans:
-            raise ValueError("Unknown plan")
+        recovered=False
+        memory=self.plans.get(plan_id)
+        expired_forward=memory is not None and memory["expires_at"]<=time.time() and memory["spec"]["kind"] in ("managed_forward","managed_interface_forward") and memory["status"]=="applied" and self.config.forwarding_recovery_directory is not None
+        if memory is None or expired_forward:
+            if not self.config.forwarding_recovery_directory:raise ValueError("Unknown plan; no durable forwarding recovery configured")
+            receipt=self.forward_receipts.load(plan_id)
+            if receipt["phase"]!="completed":raise ValueError("Uncertain interrupted operation; inspect current state, no automatic recovery")
+            saved=receipt["plan"]
+            if saved["spec"]["kind"] not in ("managed_forward","managed_interface_forward"):raise ValueError("Unsupported durable recovery kind")
+            self.check_plan(saved)
+            self.plans[plan_id]=saved;recovered=True
         plan=self.plans[plan_id]
         if plan["spec"]["kind"] in ("managed_lifecycle","managed_forward_batch"):
             raise ValueError("Lifecycle changes have no exact rollback; preview a separate compensating operation after inspection")
         if plan["status"]!="applied" or plan["mode"]!="apply":
             raise ValueError("No verified applied change to roll back")
-        if plan["expires_at"]<=time.time():
+        if plan["expires_at"]<=time.time() and not recovered:
             raise ValueError("Rollback window expired; inspect manually")
         self.check_plan(plan)
         site=self.validate(plan["box"],plan["spec"]).model_copy(deep=True)
@@ -227,4 +253,6 @@ class WriteManager:
             expected=plan["result"]["data"]["state"]["fingerprint"]
             if current.get("status")!="ok" or current["data"]["fingerprint"]!=expected:
                 return {"status":"stale","reason":"State changed since application. No automatic rollback."}
-            return self.new_plan(plan["box"],plan["spec"],current["data"],"rollback",plan["result"]["data"].get("context"))
+            recovery_spec=copy.deepcopy(plan["spec"])
+            if recovered:recovery_spec["maintenance_until"]=int(time.time())+300
+            return self.new_plan(plan["box"],recovery_spec,current["data"],"rollback",plan["result"]["data"].get("context"))

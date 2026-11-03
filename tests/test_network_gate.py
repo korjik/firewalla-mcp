@@ -9,11 +9,30 @@ gate=importlib.util.module_from_spec(specification);specification.loader.exec_mo
 
 def test_narrow_network_gate():
     assert gate.validated(command('managed_workflow_state',{}),PIN,PIN)[1] is None
-    for kind in ('managed_forward','managed_forward_batch'):
-        assert gate.validated(command('managed_write',{'spec':{'kind':kind},'mode':'apply'}),PIN,PIN)[1] is None
+    for kind in ('managed_forward','managed_interface_forward','managed_forward_batch'):
+        assert gate.validated(command('managed_write',{'spec':{'kind':kind},'mode':'apply'},'110' if kind=='managed_forward_batch' else '20'),PIN,PIN)[1] is None
     for kind in ('managed_feature','managed_rule','managed_scoped','route','dnat','vpn_workflow'):
-        with pytest.raises(ValueError):gate.validated(command('managed_write',{'spec':{'kind':kind},'mode':'apply'}),PIN,PIN)
+        with pytest.raises(ValueError):gate.validated(command('managed_write',{'spec':{'kind':kind},'mode':'apply'},'110' if kind=='managed_forward_batch' else '20'),PIN,PIN)
     with pytest.raises(ValueError):gate.validated(command('write',{}),PIN,PIN)
 
 def test_real_helper_command_stays_within_ssh_argument_bound():
     assert len(remote_command('managed_workflow_state',{'revision':'a'*40,'spec':spec()}).encode())<131072
+
+def test_network_gate_preserves_pinned_capture_only():
+    import shlex
+    from test_vpn_only_gate import CODE
+    cmd=shlex.join(['sudo','-n','timeout','--signal=TERM','--kill-after=3','22','python3','-I','-c',CODE])
+    assert gate.validated(cmd,PIN,PIN,capture_digest=PIN)[0][0]=='sudo'
+    with pytest.raises(ValueError):gate.validated(cmd,PIN,PIN,capture_digest='0'*64)
+    assert gate.validated(command('forward_interfaces',{}),PIN,PIN)[1] is None
+
+def test_forward_helper_pin_no_arbitrary_command(tmp_path):
+    import hashlib,os
+    parent=tmp_path/'ssh';parent.mkdir(mode=0o700)
+    helper=parent/'forward.pyz';helper.write_bytes(b'synthetic-reviewed-helper');helper.chmod(0o600)
+    pin=hashlib.sha256(helper.read_bytes()).hexdigest()
+    args,fd=gate.validated('firewalla-forward-lifecycle-v1',PIN,PIN,forward_digest=pin,forward_path=str(helper))
+    try:assert args[:4]==['timeout','110','python3','-I']
+    finally:os.close(fd)
+    with pytest.raises(ValueError):gate.validated('firewalla-forward-lifecycle-v1',PIN,PIN,forward_digest='0'*64,forward_path=str(helper))
+    with pytest.raises(ValueError):gate.validated('firewalla-forward-lifecycle-v1 arbitrary',PIN,PIN,forward_digest=pin,forward_path=str(helper))
