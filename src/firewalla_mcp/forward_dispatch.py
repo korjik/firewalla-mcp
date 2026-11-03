@@ -5,6 +5,7 @@ import sys
 import time
 from .forward_native import NativeForwardAdapter
 from . import remote
+from .forward_errors import failure_code
 
 async def handle(request):
     if not isinstance(request,dict) or set(request)!={'operation','revision','template','arguments'}:raise ValueError('request shape')
@@ -38,8 +39,9 @@ def main():
         data=asyncio.run(handle(request))
         output=json.dumps({'status':'ok','data':data},separators=(',',':'))
         if len(output.encode())>524288:raise ValueError('output bound')
-    except Exception:
+    except Exception as error:
         output=json.dumps({'status':'uncertain' if isinstance(request,dict) and request.get('operation')=='mutate' else 'unsupported',
+                           'error_code':failure_code(error),
                            'reason':'Lifecycle contract, permission, state or bounded operation failed; inspect before any retry.'})
     print(output)
 

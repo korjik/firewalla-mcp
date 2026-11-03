@@ -156,3 +156,18 @@ to finish or reach its deadline. After it releases the lock, inspect the verifie
 partial state and obtain fresh confirmation for a continuation or conditional
 rollback. Do not clear recovery records or extend a running plan's expiry. A
 recovery preview is not permission to execute it.
+## Failure diagnostics
+
+Lifecycle failures are fail-closed and are never automatically retried. The client
+distinguishes a nonzero SSH/helper exit, a malformed protocol response, and a
+helper-reported `unsupported` or `uncertain` result. New helpers include a fixed,
+allowlisted error category; exception messages, command output, and stderr are
+not returned. Older helpers report `unspecified`. An `uncertain` mutation still
+requires inspection/recovery before any further action.
+
+These categories narrow investigation; they do not establish a particular failed
+guard or prove that a mutation did not run. For example, `unsupported_contract`
+can reflect a legitimate source, schema, state, or permission-related rejection.
+Ordinary health and saved-mapping reads do not exercise every lifecycle guard.
+Changing the helper requires a separately reviewed artifact and matching pin;
+upgrading only the client cannot recover details already discarded by an old helper.

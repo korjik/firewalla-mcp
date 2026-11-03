@@ -2,6 +2,28 @@
 import asyncio
 import json
 from .transport import ssh_argv,bounded_read
+from .forward_errors import ERROR_CODES
+
+
+def decode_response(raw, code):
+    # Exit status takes precedence: failed SSH/gates may return no JSON at all.
+    if code:
+        raise ValueError('Lifecycle SSH/helper process failed; no retry')
+    try:
+        data=json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise ValueError('Lifecycle response protocol failed; no retry') from None
+    if not isinstance(data,dict):
+        raise ValueError('Lifecycle response protocol failed; no retry')
+    if data.get('status') in ('unsupported','uncertain'):
+        diagnostic=data.get('error_code')
+        if not isinstance(diagnostic,str) or diagnostic not in ERROR_CODES:
+            diagnostic='unspecified'
+        status=data['status']
+        raise ValueError(f'Lifecycle helper reported {status} ({diagnostic}); no retry')
+    if data.get('status')!='ok' or not isinstance(data.get('data'),dict):
+        raise ValueError('Lifecycle response protocol failed; no retry')
+    return data['data']
 
 class LifecycleSSH:
     def __init__(self,site,template):self.site=site;self.template=template;self.policies=[];self.receipts=[];self.adoptions=None
@@ -15,9 +37,8 @@ class LifecycleSSH:
         try:
             async with asyncio.timeout(115):
                 proc.stdin.write(raw);await proc.stdin.drain();proc.stdin.close()
-                data=json.loads(await bounded_read(proc.stdout,524288));code=await proc.wait()
-                if code or data.get('status')!='ok':raise ValueError('Lifecycle transport/contract failed; no retry')
-                return data['data']
+                raw=await bounded_read(proc.stdout,524288);code=await proc.wait()
+                return decode_response(raw,code)
         finally:
             if proc.returncode is None:proc.kill();await proc.wait()
     async def snapshot(self):
