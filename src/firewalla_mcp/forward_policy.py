@@ -76,7 +76,13 @@ def reject_duplicate(rows,value):
 
 
 def projection_script():
-    """Bounded atomic metadata-only read; full rows never cross the transport."""
+    """Bounded atomic metadata-only read; full rows never cross the transport.
+
+    Value budgets cover configured identity, including unknown fields. The exact
+    observational allowlist is neither fetched nor fingerprinted, so traffic
+    statistics cannot exhaust that budget. Those fields still count toward the
+    schema limit, checked before enumerating field names.
+    """
     import json
     fields=json.dumps(list(PROJECTION_FIELDS),separators=(',',':'))
     return """
@@ -86,13 +92,19 @@ local rows={};local bytes=0
 local observational={hitCount=true,lastHitTs=true,lastHitFlow=true,statsResetTs=true}
 for _,id in ipairs(ids) do
  if not string.match(id,'^%d+$') or #id>20 then error('policy identity') end
- local key='policy:'..id;local names=redis.call('HKEYS',key)
- if #names==0 or #names>96 then error('policy schema bound') end
+ local key='policy:'..id;local count=redis.call('HLEN',key)
+ if count==0 or count>96 then error('policy schema bound') end
+ local names=redis.call('HKEYS',key)
  local row={pid=id};local known={};for _,f in ipairs(fields) do known[f]=true end
  local complete=true;local unknown={}
  for _,f in ipairs(names) do
-  local n=redis.call('HSTRLEN',key,f);bytes=bytes+n
-  if n>8192 or bytes>90000 then error('policy byte bound') end
+  -- These exact observational fields are neither returned nor fingerprinted.
+  -- Never read their values or charge their size to the configured identity.
+  -- Unknown fields still consume the budget and remain fingerprint-bound.
+  if not observational[f] then
+   local n=redis.call('HSTRLEN',key,f);bytes=bytes+n
+   if n>8192 or bytes>90000 then error('policy byte bound') end
+  end
   if not known[f] and not observational[f] then complete=false; if #f<=96 and string.match(f,'^[%w_%.:%-]+$') then table.insert(unknown,f) else table.insert(unknown,'unrecognized_field') end end
  end
  for _,f in ipairs(fields) do local v=redis.call('HGET',key,f); if v then row[f]=v end end
