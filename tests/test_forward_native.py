@@ -11,6 +11,7 @@ from test_interface_forward import wan_spec
 @pytest.fixture
 def native_fixture(monkeypatch,tmp_path):
     spec=wan_spec();spec['maintenance_until']=int(time.time())+300
+    monkeypatch.setattr(native.forward_rule_projection,'read_policy_rules',lambda run,pids:[run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')])
     store={'maps':[],'policies':[],'calls':[],'next_pid':123}
     monkeypatch.setattr(native.NativeForwardAdapter,'guard',lambda self:None)
     def snapshot(s):

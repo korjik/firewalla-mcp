@@ -198,3 +198,25 @@ def test_built_helper_contains_default_scope_proofs(tmp_path):
         assert 'firewalla_mcp/forward_default_wan.py' in z.namelist()
     code="import sys;sys.path.insert(0,sys.argv[1]);from firewalla_mcp.forward_default_wan import exact_default_nat;from firewalla_mcp.forward_dispatch import handle"
     subprocess.run([sys.executable,'-I','-c',code,str(archive)],check=True)
+
+
+async def test_uncertain_disabled_creation_recovers_only_with_fresh_plan(migration,monkeypatch):
+    fm,spec,store=migration;old=copy.deepcopy(store);p=await plan(migration)
+    from firewalla_mcp import forward_rule_projection
+    prior=forward_rule_projection.read_policy_rules;failed=[False]
+    def interrupted(run,pids):
+        if str(old['next_pid']) in pids and not failed[0]:
+            failed[0]=True
+            raise remote.Unsupported('synthetic full-table output limit')
+        return prior(run,pids)
+    monkeypatch.setattr(forward_rule_projection,'read_policy_rules',interrupted)
+    result=await fm.apply(p['plan_id'])
+    assert result['outcome']=='uncertain' and result['completed']==1
+    new=next(r for r in store['policies'] if r['pid']==str(old['next_pid']))
+    assert new['disabled']=='1' and all(m['dport']!='80' for m in store['maps'])
+    calls=len(store['calls']);fresh=ForwardManager(fm.writes,fm.adapter_factory)
+    recovery=await fresh.recover(p['plan_id'],False,int(time.time())+300)
+    assert len(store['calls'])==calls and [s['operation'] for s in recovery['steps']]==['create','enable']
+    assert (await fresh.apply(recovery['plan_id']))['outcome']=='applied'
+    assert all(r in store['policies'] for r in old['policies'])
+    assert old['maps'][1] in store['maps']

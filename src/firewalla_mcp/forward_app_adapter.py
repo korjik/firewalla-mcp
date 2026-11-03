@@ -2,7 +2,7 @@
 import copy
 import time
 import asyncio
-from . import remote
+from . import remote, forward_rule_projection
 from .forward_native import NativeForwardAdapter
 from .forward_provenance import ReceiptNativeAdapter
 from .forward_app_adoption import legacy_allow
@@ -97,7 +97,7 @@ class AppForwardAdapter(ReceiptNativeAdapter):
         pid=row['instance']['id'];sets={}
         if row['enabled']:
             name='c_bp_'+pid+'_local_port';sets[name]=remote.run(['sudo','-n','ipset','save',name])
-        if rules is None:rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+        if rules is None:rules=forward_rule_projection.read_policy_rules(remote.run,[pid])
         return verify_legacy_allow(row['value'],pid,*rules,sets,row['enabled'])
 
     async def verify(self,state,removed=()):
@@ -108,7 +108,9 @@ class AppForwardAdapter(ReceiptNativeAdapter):
         def proof(row):
             nonlocal rules
             if rules is None:
-                rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+                pids=[r['instance']['id'] for k,r in state['objects'].items() if k in self.app_values]
+                pids += [r['before']['instance']['id'] for r in legacy]
+                rules=forward_rule_projection.read_policy_rules(remote.run,pids)
             return self.legacy_proof(row,rules)
         for key,row in state['objects'].items():
             if key in self.app_values and not proof(row):return False

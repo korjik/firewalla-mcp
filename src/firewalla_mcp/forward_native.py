@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 import time
-from . import remote
+from . import remote, forward_rule_projection
 from .forward_policy import native_allow, read_projection, reject_duplicate, IDENTITY_FIELDS
 from .forward_enforcement import verify_policy
 from .forward_dependencies import require_mapping_removal, hairpin_evidence
@@ -101,7 +101,9 @@ class NativeForwardAdapter:
         def rules_once():
             nonlocal filter_rules
             if filter_rules is None:
-                filter_rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+                pids=[r['instance']['id'] for k,r in state['objects'].items() if k.startswith('policy:mcp:')]
+                pids += [r['before']['instance']['id'] for r in removed if r['before']['kind']=='allow_policy']
+                filter_rules=forward_rule_projection.read_policy_rules(remote.run,pids)
             return filter_rules
         for key,row in state['objects'].items():
             if key.startswith('mapping:mcp:'):
@@ -189,7 +191,7 @@ class NativeForwardAdapter:
                 if kind=='mapping':
                     if self.mapping_evidence(value,spec)['nat_rule_observed'] or hairpin_evidence(remote.run,value):continue
                 else:
-                    remaining=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+                    remaining=forward_rule_projection.read_policy_rules(remote.run,[pid])
                     if not verify_policy(value,pid,*remaining,{},False):continue
             if await self.verify(after):return {'verified':True}
         return {'verified':False}

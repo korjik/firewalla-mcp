@@ -147,3 +147,23 @@ PR #5 is guidance-only and retains the old default-WAN limitation; its guidance
 must be reconciled if combined with this executor. The compact atomic policy
 projection reduces wire size without relaxing bounds; this migration uses that
 existing inventory contract and does not lift its limits.
+
+
+## Bounded enforcement projection
+
+Enforcement verification scans every IPv4/IPv6 filter chain on the router and
+projects only exact `rule_<policy ID>` comments before the response crosses the
+existing 131,072-byte subprocess boundary. This preserves detection of duplicate
+rules and rules in unexpected chains. It does not read just the expected allow
+chain, truncate a full dump, increase the response cap or treat a read failure as
+absence. The scanner accepts at most 64 exact IDs, 4,096 lines, 16,384 bytes per
+line and 4 MiB of input per family. It requires complete UTF-8 lines, successful
+native command completion and a bounded complete response; timeout, malformed
+output and any bound failure yield no proof. Each verification pass reads fresh
+evidence. The strict existing rule and ipset verifiers remain unchanged.
+
+If native disabled-policy creation completed but verification failed, the original
+transaction remains uncertain. A fresh recovery preview must bind the observed
+policy ID/birth and exact state and verify enforcement before proposing the
+remaining mapping creation and policy enable. Recovery requires new confirmation;
+installing this fix never resumes, enables or deletes anything automatically.
