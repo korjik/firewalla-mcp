@@ -947,10 +947,12 @@ def nat_overlaps(selectors, protocol, port_number):
     return matches!=neg
 
 
-def interface_nat_guard(spec, owned, known_sets=None):
+def interface_nat_guard(spec, owned, known_sets=None, lifecycle_mappings=()):
     """Conservative possible-overlap evidence, never evidence of a desired mapping."""
     import shlex
-    removed=False;evidence=[]
+    removed=False;evidence=[];default_seen=set()
+    if lifecycle_mappings:
+        from .forward_default_wan import exact_lifecycle_nat
     for line in run(["sudo","-n","iptables","-t","nat","-S"]).splitlines():
         r=shlex.split(line)
         if not r or r[0] not in ("-A","--append"):continue
@@ -960,6 +962,10 @@ def interface_nat_guard(spec, owned, known_sets=None):
         if chain=="FW_PRERT_VC_PORT_FORWARD":continue
         if not nat_overlaps(selectors,spec["protocol"],spec["external_port"]):continue
         def value(flag):return r[r.index(flag)+1] if flag in r and r.index(flag)+1<len(r) else None
+        matches=[i for i,m in enumerate(lifecycle_mappings) if exact_lifecycle_nat(r,m)]
+        if matches:
+            if len(matches)!=1 or matches[0] in default_seen:raise Unsupported("Ambiguous default WAN kernel rule")
+            default_seen.add(matches[0]);continue
         selected="c_ip_"+spec["interface_uuid"][:13]+"_set";match=value("--match-set")
         if "!" not in r and known_sets and match in known_sets and match!=selected and r[r.index("--match-set")+2:r.index("--match-set")+3]==["dst"] and not set(known_sets[match])&set(known_sets.get(selected,[])):continue
         expected={"-A":"FW_PRERT_PORT_FORWARD","-p":spec["protocol"],"--dport":str(spec["external_port"]),"--match-set":selected,"--to-destination":spec["destination_ip"]+":"+str(spec["destination_port"])}
@@ -1020,7 +1026,7 @@ def forward_ingress_guard(profile):
     return forward_digest(sets)
 
 
-def forward_snapshot(spec, expected_policy_profile=None, defer_ingress=False):
+def forward_snapshot(spec, expected_policy_profile=None, defer_ingress=False, lifecycle_mappings=()):
     raw=run(["redis-cli","--raw","GET","extension.portforward.config"]).strip()
     config=json.loads(raw) if raw else {"maps":[]}
     if not isinstance(config,dict) or set(config)!={"maps"} or not isinstance(config["maps"],list) or len(config["maps"])>256:
@@ -1046,7 +1052,9 @@ def forward_snapshot(spec, expected_policy_profile=None, defer_ingress=False):
     policy=json.loads(policy_raw) if policy_raw else None
     if spec["kind"]=="managed_interface_forward":
         environment=interface_forward_environment(spec)
-        conflict,kernel=interface_nat_guard(spec,bool(owned) or exact,environment.get("sets"))
+        if lifecycle_mappings:
+            conflict,kernel=interface_nat_guard(spec,bool(owned) or exact,environment.get("sets"),[m for m in lifecycle_mappings if m in maps])
+        else:conflict,kernel=interface_nat_guard(spec,bool(owned) or exact,environment.get("sets"))
         if isinstance(kernel,dict):details["kernel_dnat"]=kernel
         if conflict:collisions.append({"source":"observed competing DNAT"})
         settings_hash=forward_digest({"environment":environment,"competing_nat":conflict})

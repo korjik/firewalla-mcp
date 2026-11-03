@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 import sys
 import zipfile
-MODULES=('forward_dispatch','forward_native','forward_policy','forward_enforcement','forward_dependencies',
+MODULES=('forward_default_wan','forward_dispatch','forward_native','forward_policy','forward_enforcement','forward_dependencies',
          'forward_transaction','forward_journal','forward_receipts','forward_provenance','forward_app_adapter','forward_app_adoption','forward_app_enforcement','ipv6_adapter','ipv6_policy','forwarding_guidance','writes','remote')
 def build(destination):
     root=Path(__file__).resolve().parents[1]/'src/firewalla_mcp'

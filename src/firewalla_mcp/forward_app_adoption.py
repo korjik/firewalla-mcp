@@ -62,7 +62,7 @@ def legacy_allow(row):
     return value
 
 
-def select_app_objects(mappings,policies,mapping_selections,policy_selections):
+def select_app_objects(mappings,policies,mapping_selections,policy_selections, *, allow_default_wan=False):
     """Read-only exact selection, never broad 'all rules' or port-only deletion.
 
     Policy selections bind PID, birth and full semantic hash. Mapping selections
@@ -76,7 +76,10 @@ def select_app_objects(mappings,policies,mapping_selections,policy_selections):
         if set(sel)!={'fingerprint'} or not re.fullmatch('[a-f0-9]{64}',sel['fingerprint']) or sel['fingerprint'] in seen:raise ValueError('Exact unique mapping selection')
         seen.add(sel['fingerprint']);matches=[m for m in mappings if digest(m)==sel['fingerprint']]
         if len(matches)!=1:raise ValueError('Mapping identity drift')
-        m=matches[0];proof=require_mapping_removal(m,mappings)
+        m=matches[0];proof=require_mapping_removal(m,mappings,allow_default_wan=allow_default_wan)
+        if 'wanUUID' not in m:
+            from .forward_default_wan import default_inventory
+            default_inventory(m,mappings,True)
         if not isinstance(m.get('description'),str) or len(m['description'])>256:raise ValueError('Mapping label bound')
         if not re.fullmatch(r'(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}',m.get('toMac','')):raise ValueError('Mapping device identity')
         chosen.append({'kind':'mapping','key':'mapping:'+digest(m),'value':copy.deepcopy(m),'fingerprint':digest(m),'structural':proof})

@@ -153,6 +153,12 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             all_mappings requires an exact complete inventory, never discovers extra deletions.
             App selection is explicit adoption, not ownership inferred from labels. Old legacy
             allows may be dual-stack; recreated forwards are IPv4 DNAT with scoped IPv4 allows.
+            An omitted-WAN app mapping can migrate to this explicitly selected WAN only:
+            select one mapping, no policies, all_mappings=false and one replacement with
+            the same device/IP/protocol/external port and a different internal port.
+            Show all-WAN to single-WAN narrowing and the new IPv4 inbound allow separately.
+            Existing policies are preserved; autoFirewall metadata never proves ownership.
+            Rollback restores original all-WAN scope and requires fresh confirmation.
             No NAT66. Show every removal/creation and outage/partial-failure risk; get one
             explicit confirmation, then apply_forwarding_lifecycle. Expiry/drift stops execution;
             recovery after restart requires fresh confirmation and may allocate new policy IDs.
