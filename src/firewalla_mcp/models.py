@@ -137,12 +137,12 @@ class ForwardMetadataChange(BaseModel):
 
 class LifecycleRemoval(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    key: Annotated[str,Field(pattern=r'^(mapping|policy):mcp:[a-f0-9]{32}$')]
+    key: Annotated[str,Field(pattern=r'^(mapping|policy):mcp:[a-f0-9]{32}$',description='MCP lifecycle key only. Digest-based app mapping keys belong to preview_forwarding_reset, subject to its scope and dependency checks.')]
     fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{64}$')]
 
 class AppMappingSelection(BaseModel):
     model_config=ConfigDict(extra='forbid')
-    key: Annotated[str,Field(pattern=r'^mapping:(?:mcp:[a-f0-9]{32}|[a-f0-9]{64})$')]
+    key: Annotated[str,Field(pattern=r'^mapping:(?:mcp:[a-f0-9]{32}|[a-f0-9]{64})$',description='Exact inspection key. A valid key is not reset eligibility: inspect app_reset and preserve mappings lacking the selected explicit WAN UUID.')]
     fingerprint: Annotated[str,Field(pattern=r'^[a-f0-9]{64}$')]
 
 class AppPolicySelection(BaseModel):

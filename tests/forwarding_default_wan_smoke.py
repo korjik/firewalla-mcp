@@ -7,7 +7,6 @@ from firewalla_mcp.forward_dependencies import hairpin_evidence
 
 def run(args):
     if args[:2]==['sudo','-n']:args=args[2:]
-    if args[0]=='iptables':args=['iptables-legacy',*args[1:]]
     result=subprocess.run(args,capture_output=True,text=True,timeout=5)
     if result.returncode:raise RuntimeError(result.stderr.strip())
     return result.stdout

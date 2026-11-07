@@ -11,6 +11,7 @@ from .forward_provenance import load_receipts,merge_receipts,ReceiptNativeAdapte
 from .forward_native import NativeForwardAdapter
 from .forward_transaction import build_plan
 from .forward_dependencies import require_mapping_removal
+from .forward_selection import mapping_reset_support,require_reset_scope
 
 class ForwardManager:
     def __init__(self,writes,adapter_factory=LifecycleSSH):
@@ -61,9 +62,13 @@ class ForwardManager:
         async with self.writes.locks[box]:
             adapter=self.adapter(box,spec)
             state=await adapter.snapshot()
-            return {'objects':[{'key':key,'fingerprint':digest(row),**row} for key,row in state['objects'].items()],
+            maps=[r['value'] for r in state['objects'].values() if r['kind']=='mapping']
+            return {'objects':[{'key':key,'fingerprint':digest(row),**row,
+                    **({'app_reset':mapping_reset_support(row['value'],maps,interface)} if row['kind']=='mapping' else {})}
+                    for key,row in state['objects'].items()],
                     'environment_fingerprint':digest(state['environment']),
-                    'warning':'Inventory is not ownership proof or effective reachability. Exact removal selections require a fresh confirmed plan.'}
+                    'app_reset_enabled':self.config.forwarding_app_management_enabled,
+                    'warning':'Inventory is not ownership proof or effective reachability. Only MCP keys are accepted by preview_forwarding_lifecycle; digest-based app mapping keys use preview_forwarding_reset when enabled and structurally supported. Exact removal selections require a fresh confirmed plan.'}
     async def preview(self,box,device,destination,interface,actions,removals,maintenance_until):
         box,spec=self.template(box,device,destination,interface,maintenance_until)
         binding=self.binding(box)
@@ -170,7 +175,8 @@ class ForwardManager:
                     continue
                 policies.append({'id':p['pid'],'birth':str(p['timestamp']),'fingerprint':p['full_fingerprint'],
                     'kind':kind,'value':value,'enabled':p.get('disabled') not in ('1',1,True)})
-            return {'mappings':[{'key':k,'fingerprint':digest(r),**r} for k,r in state['objects'].items() if r['kind']=='mapping'],
+            maps=[r['value'] for r in state['objects'].values() if r['kind']=='mapping']
+            return {'mappings':[{'key':k,'fingerprint':digest(r),**r,'app_reset':mapping_reset_support(r['value'],maps,interface)} for k,r in state['objects'].items() if r['kind']=='mapping'],
                 'policy_candidates':policies,'ineligible_policy_candidates':ineligible,'all_policy_count':len(adapter.policies),'truncated':False,
                 'warning':'Candidates are not ownership or exclusive-association proof. Exact selection and complete dependency validation required. Legacy allows may cover IPv6 and non-DNAT traffic.'}
 
@@ -184,6 +190,7 @@ class ForwardManager:
                 if set(sel)!={'key','fingerprint'} or sel['key'] in mapping_keys:raise ValueError('Exact unique mapping selection')
                 row=before['objects'].get(sel['key'])
                 if row is None or row['kind']!='mapping' or digest(row)!=sel['fingerprint']:raise ValueError('Mapping selection drift')
+                require_reset_scope(row['value'],maps,interface)
                 selected_maps.append(row['value']);mapping_keys.append(sel['key'])
             defaults=[m for m in selected_maps if 'wanUUID' not in m]
             if defaults:
