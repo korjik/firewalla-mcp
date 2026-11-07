@@ -115,7 +115,14 @@ class ForwardManager:
             if plan.get('status')=='no_change':return plan
             if old.get('metadata_receipts'):plan['metadata_receipts']=old['metadata_receipts']
             if old.get('app_adoptions'):plan['app_adoptions']=old['app_adoptions']
-            return self.remember(plan,template,old.get('disclosures',[]))
+            disclosures=copy.deepcopy(old.get('disclosures',[]))
+            for step in plan['steps']:
+                row=step['after']
+                if row and row['kind']=='mapping' and 'wanUUID' not in row['value']:
+                    disclosures.append({'recovery_scope_change':'restore_native_default_wans',
+                        'restored_mapping':copy.deepcopy(row['value']),
+                        'warning':'Restores all native WAN destinations, not just the selected WAN; fresh explicit confirmation required'})
+            return self.remember(plan,template,disclosures)
 
     async def preview_metadata(self,box,device,destination,interface,changes,maintenance_until):
         box,spec=self.template(box,device,destination,interface,maintenance_until)
@@ -178,6 +185,18 @@ class ForwardManager:
                 row=before['objects'].get(sel['key'])
                 if row is None or row['kind']!='mapping' or digest(row)!=sel['fingerprint']:raise ValueError('Mapping selection drift')
                 selected_maps.append(row['value']);mapping_keys.append(sel['key'])
+            defaults=[m for m in selected_maps if 'wanUUID' not in m]
+            if defaults:
+                # Deliberately narrow migration surface: one exact mapping to
+                # one named WAN, same device/address/protocol/external port.
+                if len(selected_maps)!=1 or len(actions)!=1 or policy_selections or all_mappings:
+                    raise ValueError('Default WAN migration requires one mapping, one replacement and no policy removals')
+                old=defaults[0];new=actions[0]
+                if (old.get('toMac','').upper()!=spec['device'] or old.get('toIP')!=spec['destination_ip']
+                    or old.get('protocol')!=new.get('protocol') or str(old.get('dport'))!=str(new.get('external_port'))):
+                    raise ValueError('Default WAN migration must preserve target, protocol and external port')
+                if str(old.get('toPort'))==str(new.get('destination_port')):
+                    raise ValueError('Default WAN migration currently requires a different destination port for independent hairpin proofs')
             raw=[];legacy=[];policy_ids=[]
             from .forward_app_adoption import legacy_allow,select_app_objects
             for sel in policy_selections:
@@ -190,9 +209,10 @@ class ForwardManager:
                 except ValueError:base.policy_value(p)
                 raw.append(p);policy_ids.append(p['pid'])
             select_app_objects(maps,base.policies,[{'fingerprint':digest(m)} for m in selected_maps],
-                [s for s in policy_selections if s['id'] in {p['pid'] for p in legacy}])
+                [s for s in policy_selections if s['id'] in {p['pid'] for p in legacy}],allow_default_wan=bool(defaults))
             adoptions={'mappings':selected_maps,'policies':legacy}
             adapter=self.adapter(box,spec,adoptions=adoptions);initial=await adapter.snapshot()
+            if defaults and not await adapter.verify(initial):raise ValueError('Default WAN enforcement baseline unverified')
             policy_keys=[]
             for pid in policy_ids:
                 matches=[k for k,r in initial['objects'].items() if r.get('instance',{}).get('id')==pid]
@@ -206,6 +226,15 @@ class ForwardManager:
             from .forward_reset import reset_plan
             plan=await reset_plan(adapter,box,self.binding(box),mapping_keys,policy_keys,actions,all_mappings=all_mappings)
             plan['app_adoptions']=adoptions
+            if defaults:
+                plan['disclosures'].append({'scope_change':'native_default_wans_to_selected_wan',
+                    'before':'All native WAN destinations, including hairpin',
+                    'after':{'interface_uuid':interface,'destination_port':actions[0]['destination_port']},
+                    'policies':'All existing policies preserved; autoFirewall is metadata, not policy ownership',
+                    'new_inbound_allow':{'family':'ipv4','device':device,'wan_uuid':interface,
+                        'protocol':actions[0]['protocol'],'external_port':actions[0]['external_port'],
+                        'destination_port':actions[0]['destination_port'],'source_network':actions[0]['source_network']},
+                    'recovery':'Fresh confirmation required; rollback restores original omitted-WAN scope and metadata'})
             # Validate the final metadata provenance against the same live
             # baseline before exposing a confirmable plan.
             checked=self.adapter(box,spec,plan.get('metadata_receipts',[]),adoptions)

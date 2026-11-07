@@ -7,7 +7,7 @@ import json
 import re
 import time
 
-from . import remote
+from . import remote, forward_rule_projection
 from .forward_native import BLOCK_HASH
 from .forward_policy import IDENTITY_FIELDS, read_projection, reject_duplicate
 from .forward_dependencies import array
@@ -122,7 +122,7 @@ class IPv6Adapter:
         if enabled:
             for name in ('c_bd_'+pid+'_set','c_bd_'+pid+'_set6','c_bp_'+pid+'_local_port'):
                 sets[name]=remote.run(['sudo','-n','ipset','save',name])
-        rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+        rules=forward_rule_projection.read_policy_rules(remote.run,[pid])
         return verify_policy(value,pid,*rules,sets,enabled)
 
     async def verify(self,state,removed=()):

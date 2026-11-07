@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 import time
-from . import remote
+from . import remote, forward_rule_projection
 from .forward_policy import native_allow, read_projection, reject_duplicate, IDENTITY_FIELDS
 from .forward_enforcement import verify_policy
 from .forward_dependencies import require_mapping_removal, hairpin_evidence
@@ -64,9 +64,18 @@ class NativeForwardAdapter:
         if row.get('duration') not in (None,False,'') or row.get('idleTs') not in (None,False,''):raise ValueError('Timed policy unsupported')
         return value
 
+    def mapping_snapshot(self,spec):
+        return remote.forward_snapshot(spec)
+
+    def mapping_evidence(self,value,spec):
+        return remote.forward_kernel_evidence(spec)
+
+    def removal_proof(self,value,maps):
+        return require_mapping_removal(value,maps)
+
     async def snapshot(self):
         self.guard()
-        snap=remote.forward_snapshot(self.template)
+        snap=self.mapping_snapshot(self.template)
         objects={}
         for row in snap['maps']:
             desc=row.get('description','')
@@ -92,13 +101,15 @@ class NativeForwardAdapter:
         def rules_once():
             nonlocal filter_rules
             if filter_rules is None:
-                filter_rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+                pids=[r['instance']['id'] for k,r in state['objects'].items() if k.startswith('policy:mcp:')]
+                pids += [r['before']['instance']['id'] for r in removed if r['before']['kind']=='allow_policy']
+                filter_rules=forward_rule_projection.read_policy_rules(remote.run,pids)
             return filter_rules
         for key,row in state['objects'].items():
             if key.startswith('mapping:mcp:'):
                 try:spec=self.mapping_spec(row['value'])
                 except ValueError:continue  # unrelated mappings are preserved, not asserted
-                evidence=remote.forward_kernel_evidence(spec)
+                evidence=self.mapping_evidence(row['value'],spec)
                 if not evidence['nat_rule_observed'] or not evidence['vpn_ingress_link_observed'] or not hairpin_evidence(remote.run,row['value']):return False
             if key.startswith('policy:mcp:'):
                 value=row['value'];pid=row['instance']['id'];sets={}
@@ -123,7 +134,7 @@ class NativeForwardAdapter:
                     if {k:v for k,v in current['value'].items() if k not in ('description','_type')}=={k:v for k,v in row['value'].items() if k not in ('description','_type')}:
                         self.mapping_spec(current['value']);replacements.append(current)
                 if len(replacements)>1:return False
-                if not replacements and (remote.forward_kernel_evidence(spec)['nat_rule_observed'] or hairpin_evidence(remote.run,row['value'])):return False
+                if not replacements and (self.mapping_evidence(row['value'],spec)['nat_rule_observed'] or hairpin_evidence(remote.run,row['value'])):return False
             else:
                 value=self.policy_value(row['value']);pid=row['instance']['id']
                 if any(r.get('instance',{}).get('id')==pid for r in state['objects'].values()):return False
@@ -141,11 +152,11 @@ class NativeForwardAdapter:
         allocated_pid=None
         if kind=='mapping':
             spec=self.mapping_spec(value)
-            snapshot=remote.forward_snapshot(spec)
+            snapshot=self.mapping_snapshot(spec)
             if op in ('create','restore'):
                 if snapshot['collisions'] or snapshot['owned']:raise ValueError('Mapping conflict')
             elif op=='remove':
-                require_mapping_removal(value,snapshot['maps'])
+                self.removal_proof(value,snapshot['maps'])
                 if not hairpin_evidence(remote.run,value):raise ValueError('Native hairpin rule missing before removal')
                 if snapshot['collisions']!=[value]:raise ValueError('Mapping identity drift')
             else:raise ValueError('Mapping operation')
@@ -178,9 +189,9 @@ class NativeForwardAdapter:
             if allocated_pid is not None and after['objects'].get(step['key'],{}).get('instance',{}).get('id')!=allocated_pid:continue
             if op=='remove':
                 if kind=='mapping':
-                    if remote.forward_kernel_evidence(spec)['nat_rule_observed'] or hairpin_evidence(remote.run,value):continue
+                    if self.mapping_evidence(value,spec)['nat_rule_observed'] or hairpin_evidence(remote.run,value):continue
                 else:
-                    remaining=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+                    remaining=forward_rule_projection.read_policy_rules(remote.run,[pid])
                     if not verify_policy(value,pid,*remaining,{},False):continue
             if await self.verify(after):return {'verified':True}
         return {'verified':False}

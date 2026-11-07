@@ -2,7 +2,7 @@
 import copy
 import time
 import asyncio
-from . import remote
+from . import remote, forward_rule_projection
 from .forward_native import NativeForwardAdapter
 from .forward_provenance import ReceiptNativeAdapter
 from .forward_app_adoption import legacy_allow
@@ -28,7 +28,7 @@ class AppForwardAdapter(ReceiptNativeAdapter):
             self.app_values[key]=legacy_allow(row)
         if len({digest(m) for m in self.app_maps})!=len(self.app_maps):raise ValueError('Duplicate adopted mapping')
         for m in self.app_maps:
-            require_mapping_removal(m,self.app_maps)
+            require_mapping_removal(m,self.app_maps,allow_default_wan=True)
             self.mapping_spec(m)
         for v in self.app_values.values():
             matches=[m for m in self.app_maps if m['toMac'].upper()==v['scope'][0] and m['protocol']==v['protocol'] and str(m['toPort'])==v['localPort']]
@@ -37,12 +37,30 @@ class AppForwardAdapter(ReceiptNativeAdapter):
     def mapping_spec(self,value):
         if hasattr(self,'app_maps') and value in self.app_maps:
             spec={**self.template,'device':value['toMac'].upper(),'destination_ip':value['toIP'],
-                  'interface_uuid':value['wanUUID'],'protocol':value['protocol'],
+                  'interface_uuid':value.get('wanUUID',self.template['interface_uuid']),'protocol':value['protocol'],
                   'external_port':int(value['dport']),'destination_port':int(value['toPort'])}
             remote.validate_managed(spec)
             if spec['interface_uuid']!=self.template['interface_uuid']:raise ValueError('One selected WAN required')
             return spec
         return super().mapping_spec(value)
+
+    def mapping_snapshot(self,spec):
+        defaults=[m for m in self.app_maps if 'wanUUID' not in m]
+        if not defaults:return super().mapping_snapshot(spec)
+        known=list(self.app_maps)
+        for receipt in self.receipts:
+            for value in receipt['variants']:
+                if value not in known:known.append(value)
+        return remote.forward_snapshot(spec,lifecycle_mappings=known)
+
+    def removal_proof(self,value,maps):
+        return require_mapping_removal(value,maps,allow_default_wan=value in self.app_maps)
+
+    def mapping_evidence(self,value,spec):
+        if value in self.app_maps and 'wanUUID' not in value:
+            from .forward_default_wan import default_evidence
+            return default_evidence(spec,value)
+        return super().mapping_evidence(value,spec)
 
     def policy_value(self,value):
         if value in getattr(self,'app_values',{}).values():return copy.deepcopy(value)
@@ -53,7 +71,7 @@ class AppForwardAdapter(ReceiptNativeAdapter):
         env={}
         for m in self.app_maps:
             spec=self.mapping_spec(m);target=(spec['device'],spec['destination_ip'])
-            if str(target) not in env:env[str(target)]=remote.forward_snapshot(spec)['environment_fingerprint']
+            if str(target) not in env:env[str(target)]=self.mapping_snapshot(spec)['environment_fingerprint']
         state['environment']['adopted_targets']=env
         for key,value in self.app_values.items():
             original=next(p for p in self.app_policies if key=='policy:app:'+p['pid'])
@@ -79,7 +97,7 @@ class AppForwardAdapter(ReceiptNativeAdapter):
         pid=row['instance']['id'];sets={}
         if row['enabled']:
             name='c_bp_'+pid+'_local_port';sets[name]=remote.run(['sudo','-n','ipset','save',name])
-        if rules is None:rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+        if rules is None:rules=forward_rule_projection.read_policy_rules(remote.run,[pid])
         return verify_legacy_allow(row['value'],pid,*rules,sets,row['enabled'])
 
     async def verify(self,state,removed=()):
@@ -90,12 +108,14 @@ class AppForwardAdapter(ReceiptNativeAdapter):
         def proof(row):
             nonlocal rules
             if rules is None:
-                rules=[remote.run(['sudo','-n',exe,'-t','filter','-S']).splitlines() for exe in ('iptables','ip6tables')]
+                pids=[r['instance']['id'] for k,r in state['objects'].items() if k in self.app_values]
+                pids += [r['before']['instance']['id'] for r in legacy]
+                rules=forward_rule_projection.read_policy_rules(remote.run,pids)
             return self.legacy_proof(row,rules)
         for key,row in state['objects'].items():
             if key in self.app_values and not proof(row):return False
             if row['kind']=='mapping' and row['value'] in self.app_maps:
-                evidence=remote.forward_kernel_evidence(self.mapping_spec(row['value']))
+                evidence=self.mapping_evidence(row['value'],self.mapping_spec(row['value']))
                 if not evidence['nat_rule_observed'] or not evidence['vpn_ingress_link_observed'] or not hairpin_evidence(remote.run,row['value']):return False
         for item in legacy:
             pid=item['before']['instance']['id']
@@ -104,6 +124,22 @@ class AppForwardAdapter(ReceiptNativeAdapter):
         return True
 
     async def mutate(self,step,expected,expires_at):
+        row=step['after'] or step['before'];value=row['value']
+        if row['kind']=='mapping' and value in self.app_maps and 'wanUUID' not in value:
+            self.guard()
+            spec=self.mapping_spec(value)
+            evidence=self.mapping_evidence(value,spec)
+            removing=step['operation']=='remove'
+            if step['operation'] not in ('remove','restore'):raise ValueError('Default WAN restore/removal only')
+            if evidence['nat_rule_observed'] is not removing or not evidence['vpn_ingress_link_observed']:
+                raise ValueError('Default WAN enforcement changed')
+            # An all-WAN restore must also be free of competing mappings/rules
+            # on OTHER WANs, including inactive stored records.
+            snapshot=self.mapping_snapshot(spec)
+            from .forward_default_wan import default_inventory
+            default_inventory(value,snapshot['maps'],removing)
+            conflict,_=remote.interface_nat_guard(spec,False,None,[value] if removing else [])
+            if conflict:raise ValueError('Default WAN kernel overlap')
         if step['key'] not in self.app_values:return await super().mutate(step,expected,expires_at)
         self.guard();before=await self.snapshot()
         if digest(before)!=expected:raise ValueError('State drift')

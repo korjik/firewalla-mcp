@@ -80,7 +80,7 @@ def dependencies(mapping, policies, *, inventory_complete, group_tags=None, netw
             'effective_permission':'not_evaluated','absence_proven':inventory_complete and not related and not unknown}
 
 
-def mapping_removal_dependencies(mapping, mappings):
+def mapping_removal_dependencies(mapping, mappings, *, allow_default_wan=False):
     """Structural effects of pinned PortForward.find/removePort/enforceIptables.
 
     Firewall policy applicability is deliberately not deletion ownership. Native
@@ -94,8 +94,10 @@ def mapping_removal_dependencies(mapping, mappings):
     # Only the exact typed selector used by forward_value is supported. Never
     # emulate arbitrary wildcard deletion or coerce booleans/numeric selectors.
     required={'_type','active','description','dport','enabled','protocol','state','toIP','toMac','toPort','wanUUID'}
-    if set(mapping)-{'_type','autoFirewall','ts'}!=required-{'_type'} or mapping.get('_type','port_forward')!='port_forward' or mapping['protocol'] not in ('tcp','udp'):raise ValueError('Exact native removal selector required')
-    if not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}',mapping['wanUUID']):raise ValueError('Exact WAN required')
+    default_wan=allow_default_wan and 'wanUUID' not in mapping
+    shape=required-({'_type','wanUUID'} if default_wan else {'_type'})
+    if set(mapping)-{'_type','autoFirewall','ts'}!=shape or mapping.get('_type','port_forward')!='port_forward' or mapping['protocol'] not in ('tcp','udp'):raise ValueError('Exact native removal selector required')
+    if not default_wan and (not isinstance(mapping.get('wanUUID'),str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}',mapping['wanUUID'])):raise ValueError('Exact WAN required')
     if any(mapping[k] is not True for k in ('active','enabled','state')):raise ValueError('Active exact mapping required')
     if 'autoFirewall' in mapping and (type(mapping['autoFirewall']) is not int or mapping['autoFirewall'] not in (0,1)):raise ValueError('Unknown automatic firewall metadata')
     if 'ts' in mapping:
@@ -129,7 +131,7 @@ def mapping_removal_dependencies(mapping, mappings):
             ranges=ports(str(row['toPort']) if type(row.get('toPort')) is int else row.get('toPort'))
             overlap=any(lo<=internal<=hi for lo,hi in ranges)
             if row!=mapping and overlap:shared.append(ident)
-            if (row.get('wanUUID')==mapping['wanUUID'] and row.get('applyToAll') is None and row.get('extIP') is None
+            if (row.get('wanUUID')==mapping.get('wanUUID') and row.get('applyToAll') is None and row.get('extIP') is None
                     and protocol==mapping['protocol'] and port(row.get('dport'))==external and port(row.get('toPort'))==internal):
                 matches.append(ident)
         except (ValueError,TypeError,KeyError):unresolved.append(ident)
@@ -138,8 +140,8 @@ def mapping_removal_dependencies(mapping, mappings):
             'unresolved_mapping_ids':unresolved,'policy_effect':'all nonselected policies preserved; applicability is not a structural reference'}
 
 
-def require_mapping_removal(mapping,mappings):
-    report=mapping_removal_dependencies(mapping,mappings)
+def require_mapping_removal(mapping,mappings, *, allow_default_wan=False):
+    report=mapping_removal_dependencies(mapping,mappings,allow_default_wan=allow_default_wan)
     if not report['complete']:raise ValueError('Unresolved structural mapping evidence')
     if not report['selected_match'] or report['native_match_count']!=1:raise ValueError('Native removal selector matches absent or additional mappings')
     if report['shared_hairpin_ids']:raise ValueError('Shared hairpin resource; preserve mappings')

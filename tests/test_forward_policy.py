@@ -27,13 +27,14 @@ def test_unknown_identity_blocks_creation():
     with pytest.raises(ValueError,match='Incomplete'):reject_duplicate([{'identity_complete':False}],native_allow(*ARGS))
 
 def test_projection_never_returns_unselected_fields():
-    row={'pid':'1','identity_complete':True,'full_fingerprint':'a'*40}
+    row={'pid':'1','identity_complete':True,'legacy_identity':False,'full_fingerprint':'a'*40,'unknown_fields':[]}
+    wire={'version':1,'rows':[['1',True,False,'a'*40,[],[]]]}
     calls=[]
-    def run(args):calls.append(args);return json.dumps([row])
+    def run(args):calls.append(args);return json.dumps(wire)
     assert read_projection(run)==[row]
     assert calls[0][0:3]==['redis-cli','--raw','EVAL']
-    row['password']='secret'
-    with pytest.raises(ValueError,match='fields'):read_projection(run)
+    wire['password']='secret'
+    with pytest.raises(ValueError,match='wire version'):read_projection(run)
 
 @pytest.mark.parametrize('field,value',[('upnp','false'),('dnsmasq_only','false'),('trust','false'),('seq','1')])
 def test_native_default_values_never_hide_disabled_duplicate(field,value):
@@ -66,12 +67,10 @@ def test_udp_native_allow_preserves_protocol():
 
 @pytest.mark.parametrize('value',[['method'],{},[]])
 def test_unknown_field_names_are_bounded_projection_metadata(value):
- row={'pid':'1','identity_complete':False,'full_fingerprint':'a'*40,'unknown_fields':value}
- result=read_projection(lambda args:json.dumps([row]))
+ result=read_projection(lambda args:json.dumps({'version':1,'rows':[['1',False,False,'a'*40,value,[]]]}))
  assert result[0]['unknown_fields']==([] if value=={} else value)
  assert result[0]['identity_complete'] is False
 
 @pytest.mark.parametrize('value',[['bad\nname'],['x'*97],['ok']*97,'method'])
 def test_unknown_field_metadata_rejects_unbounded_input(value):
- row={'pid':'1','identity_complete':False,'full_fingerprint':'a'*40,'unknown_fields':value}
- with pytest.raises(ValueError):read_projection(lambda args:json.dumps([row]))
+ with pytest.raises(ValueError):read_projection(lambda args:json.dumps({'version':1,'rows':[['1',False,False,'a'*40,value,[]]]}))

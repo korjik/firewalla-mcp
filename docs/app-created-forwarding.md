@@ -92,3 +92,78 @@ disposable network-none container with `NET_ADMIN`: it verifies the invalid
 cross-family destination, TCP/UDP rule parsing and positive/negative IPv6 source
 set membership with an empty IPv4 set. It sends no traffic and does not establish
 packet-path or live-appliance enforcement. Never run this smoke script on a router.
+
+## Default-WAN to selected-WAN migration
+
+An app-created mapping that **omits** `wanUUID` can now be explicitly selected by
+its digest key and full object fingerprint in `preview_forwarding_reset`. The
+supported migration selects one active IPv4 TCP/UDP mapping, no policy removals,
+`all_mappings=false`, and one named replacement on the supplied WAN UUID. The
+replacement retains the device, destination IP, protocol and external port and
+uses a different internal port. For example, all-WAN TCP 80 → device:80 becomes
+selected-WAN TCP 80 → the same device:8080. Resolve the WAN UUID from current
+inventory; a provider name alone is not a selector.
+
+The preview discloses the scope narrowing and the new IPv4 inbound allow with
+its source CIDR, WAN, device and ports. All existing policies and unselected
+mappings remain intact, including HTTPS. `autoFirewall` is preserved metadata;
+it neither proves ownership of an allow policy nor authorizes deleting one.
+The original allow for port 80 may therefore remain effective independently.
+The new allow has the existing forwarding policy semantics, including direct
+routed/non-DNAT scope; it is not a guarantee of external reachability.
+
+The adapter sends the original mapping with only `state=false` for removal; it
+never fills in an omitted WAN UUID. Native matching treats missing and null WAN
+values alike, so a null-scope peer, duplicate selector, unknown fields, shared
+hairpin resources or potentially overlapping mappings on any WAN block the
+operation. An explicitly null/empty/false/wildcard WAN on the selected record is
+unsupported. DMZ, `applyToAll` and `extIP` are unsupported even when false/null.
+One exact default-chain DNAT and ingress evidence for every observed WAN are
+required. Inactive/unknown WAN environments fail closed. No output bounds or
+firmware guards are relaxed.
+
+A confirmed plan removes the original NAT, creates a disabled scoped IPv4 allow,
+creates the selected-WAN NAT, then enables the new allow. This has an outage
+window and is not atomic. A lost reply is uncertain, not a reason to retry.
+Fresh recovery inspects exact stored and kernel state; rollback explicitly
+restores the original omitted-WAN scope and metadata and removes only the new
+objects. It requires a new confirmation and maintenance window. Same-internal-
+port narrowing is intentionally unsupported until shared/recreated hairpin
+proofs cover it.
+
+The reproducible pinned-source probe is
+`node scripts/check_default_wan_contract.cjs /path/to/reviewed/portforward.js`.
+It extracts only the reviewed selector/removal/rule-builder methods into an
+isolated recorder; it never imports appliance modules. Synthetic tests cover
+complete snapshot transitions, preserved policies/443, expiry, drift, ambiguous
+selectors, uncertain replies, orphan rules and restart recovery. These are not
+live-appliance or external-reachability tests. The network-none
+`tests/forwarding_default_wan_smoke.py` check uses real legacy iptables/ipset
+with only NET_ADMIN and NET_RAW, sends no traffic, and verifies independent
+old/new NAT and hairpin tuples. Updating source does not deploy a
+helper, change its gate pin, merge a PR or authorize a live migration.
+
+PR #5 is guidance-only and retains the old default-WAN limitation; its guidance
+must be reconciled if combined with this executor. The compact atomic policy
+projection reduces wire size without relaxing bounds; this migration uses that
+existing inventory contract and does not lift its limits.
+
+
+## Bounded enforcement projection
+
+Enforcement verification scans every IPv4/IPv6 filter chain on the router and
+projects only exact `rule_<policy ID>` comments before the response crosses the
+existing 131,072-byte subprocess boundary. This preserves detection of duplicate
+rules and rules in unexpected chains. It does not read just the expected allow
+chain, truncate a full dump, increase the response cap or treat a read failure as
+absence. The scanner accepts at most 64 exact IDs, 4,096 lines, 16,384 bytes per
+line and 4 MiB of input per family. It requires complete UTF-8 lines, successful
+native command completion and a bounded complete response; timeout, malformed
+output and any bound failure yield no proof. Each verification pass reads fresh
+evidence. The strict existing rule and ipset verifiers remain unchanged.
+
+If native disabled-policy creation completed but verification failed, the original
+transaction remains uncertain. A fresh recovery preview must bind the observed
+policy ID/birth and exact state and verify enforcement before proposing the
+remaining mapping creation and policy enable. Recovery requires new confirmation;
+installing this fix never resumes, enables or deletes anything automatically.

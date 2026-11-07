@@ -76,7 +76,16 @@ def reject_duplicate(rows,value):
 
 
 def projection_script():
-    """Bounded atomic metadata-only read; full rows never cross the transport."""
+    """Bounded atomic metadata-only read; full rows never cross the transport.
+
+    Value budgets cover configured identity, including unknown fields. The exact
+    observational allowlist is neither fetched nor fingerprinted, so traffic
+    statistics cannot exhaust that budget. Those fields still count toward the
+    schema limit, checked before enumerating field names.
+
+    A versioned sparse wire format avoids repeated schema names, while keeping
+    one atomic snapshot and the existing 128 KiB subprocess output cap.
+    """
     import json
     fields=json.dumps(list(PROJECTION_FIELDS),separators=(',',':'))
     return """
@@ -86,13 +95,19 @@ local rows={};local bytes=0
 local observational={hitCount=true,lastHitTs=true,lastHitFlow=true,statsResetTs=true}
 for _,id in ipairs(ids) do
  if not string.match(id,'^%d+$') or #id>20 then error('policy identity') end
- local key='policy:'..id;local names=redis.call('HKEYS',key)
- if #names==0 or #names>96 then error('policy schema bound') end
+ local key='policy:'..id;local count=redis.call('HLEN',key)
+ if count==0 or count>96 then error('policy schema bound') end
+ local names=redis.call('HKEYS',key)
  local row={pid=id};local known={};for _,f in ipairs(fields) do known[f]=true end
  local complete=true;local unknown={}
  for _,f in ipairs(names) do
-  local n=redis.call('HSTRLEN',key,f);bytes=bytes+n
-  if n>8192 or bytes>90000 then error('policy byte bound') end
+  -- These exact observational fields are neither returned nor fingerprinted.
+  -- Never read their values or charge their size to the configured identity.
+  -- Unknown fields still consume the budget and remain fingerprint-bound.
+  if not observational[f] then
+   local n=redis.call('HSTRLEN',key,f);bytes=bytes+n
+   if n>8192 or bytes>90000 then error('policy byte bound') end
+  end
   if not known[f] and not observational[f] then complete=false; if #f<=96 and string.match(f,'^[%w_%.:%-]+$') then table.insert(unknown,f) else table.insert(unknown,'unrecognized_field') end end
  end
  for _,f in ipairs(fields) do local v=redis.call('HGET',key,f); if v then row[f]=v end end
@@ -102,18 +117,63 @@ for _,id in ipairs(ids) do
  -- Bind every original field without returning unselected values. Sorting keys
  -- avoids HGETALL enumeration order affecting the canonical fingerprint.
  table.sort(names);local all={};for _,f in ipairs(names) do if not observational[f] then table.insert(all,f);table.insert(all,redis.call('HGET',key,f)) end end
- row.full_fingerprint=redis.sha1hex(cjson.encode(all));table.insert(rows,row)
+ row.full_fingerprint=redis.sha1hex(cjson.encode(all))
+ -- Sparse field indices avoid repeating long schema names for every policy.
+ -- Keep one atomic snapshot: pagination could mix identities across reads.
+ local values={};for i,f in ipairs(fields) do if f~='pid' and row[f]~=nil then table.insert(values,i);table.insert(values,row[f]) end end
+ table.insert(rows,{id,complete,row.legacy_identity,row.full_fingerprint,unknown,values})
 end
-return cjson.encode(rows)
+local output=cjson.encode({version=1,rows=rows})
+-- redis-cli adds a newline; retain the existing subprocess output cap.
+if #output>131071 then error('policy projection output bound') end
+return output
 """,fields
 
 
-def read_projection(run):
+def decode_projection(raw):
+    """Expand the bounded internal wire format without changing policy identity."""
     import json
+    if not isinstance(raw,str) or len(raw.encode('utf-8'))>131072:
+        raise ValueError('Projection output bound')
+    def unique_object(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result:raise ValueError('Duplicate projection object key')
+            result[key]=value
+        return result
+    try:wire=json.loads(raw,object_pairs_hook=unique_object)
+    except ValueError:raise ValueError('Invalid projection response') from None
+    if not isinstance(wire,dict) or set(wire)!={'version','rows'} or type(wire['version']) is not int or wire['version']!=1:
+        raise ValueError('Projection wire version')
+    packed=wire['rows']
+    if packed=={}:packed=[]  # Redis Lua cjson encodes empty tables as objects.
+    if not isinstance(packed,list) or len(packed)>512:raise ValueError('Projection bound')
+    rows=[];value_bytes=0
+    for item in packed:
+        if not isinstance(item,list) or len(item)!=6:raise ValueError('Projection row shape')
+        pid,complete,legacy,fingerprint,unknown,values=item
+        if values=={}:values=[]
+        if not isinstance(values,list) or len(values)%2 or len(values)>2*(len(PROJECTION_FIELDS)-1):
+            raise ValueError('Projection value shape')
+        row={'pid':pid,'identity_complete':complete,'legacy_identity':legacy,
+             'full_fingerprint':fingerprint,'unknown_fields':unknown}
+        seen=set()
+        for i in range(0,len(values),2):
+            index,value=values[i:i+2]
+            if type(index) is not int or not 1<=index<=len(PROJECTION_FIELDS) or index in seen:
+                raise ValueError('Projection field index')
+            seen.add(index);field=PROJECTION_FIELDS[index-1]
+            if field=='pid' or not isinstance(value,str):raise ValueError('Projection field value')
+            n=len(value.encode('utf-8'));value_bytes+=n
+            if n>8192 or value_bytes>90000:raise ValueError('Projection value bound')
+            row[field]=value
+        rows.append(row)
+    return rows
+
+
+def read_projection(run):
     script,fields=projection_script()
-    rows=json.loads(run(['redis-cli','--raw','EVAL',script,'0',fields]))
-    if rows=={}:rows=[]
-    if not isinstance(rows,list) or len(rows)>512:raise ValueError('Projection bound')
+    rows=decode_projection(run(['redis-cli','--raw','EVAL',script,'0',fields]))
     seen=set()
     for row in rows:
         if not isinstance(row,dict) or set(row)-set(PROJECTION_FIELDS)-{'identity_complete','full_fingerprint','legacy_identity','unknown_fields'}:raise ValueError('Projection fields')
@@ -125,5 +185,6 @@ def read_projection(run):
         if not isinstance(pid,str) or not re.fullmatch('[0-9]{1,20}',pid) or pid in seen:raise ValueError('Projection identity')
         seen.add(pid)
         if 'legacy_identity' in row and type(row['legacy_identity']) is not bool:raise ValueError('Legacy identity shape')
-        if type(row.get('identity_complete')) is not bool or not re.fullmatch('[a-f0-9]{40}',row.get('full_fingerprint','')):raise ValueError('Projection completeness')
+        fingerprint=row.get('full_fingerprint')
+        if type(row.get('identity_complete')) is not bool or not isinstance(fingerprint,str) or not re.fullmatch('[a-f0-9]{40}',fingerprint):raise ValueError('Projection completeness')
     return rows

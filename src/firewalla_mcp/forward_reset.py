@@ -33,7 +33,7 @@ async def reset_plan(adapter,box,binding,mapping_keys,policy_keys,actions,*,all_
     for key in mapping_keys:
         row=state['objects'][key]
         if row['kind']!='mapping':raise ValueError('Exact NAT selection required')
-        spec=adapter.mapping_spec(row['value']);proof=require_mapping_removal(row['value'],maps)
+        spec=adapter.mapping_spec(row['value']);proof=require_mapping_removal(row['value'],maps,allow_default_wan='wanUUID' not in row['value'])
         disclosures.append({'remove_mapping':key,'device':spec['device'],'destination':spec['destination_ip'],'protocol':spec['protocol'],
                             'external_port':spec['external_port'],'destination_port':spec['destination_port'],'structural':proof})
         step={'operation':'remove','key':key,'before':row,'after':None};steps.append(step);state=transition(state,step)
