@@ -8,6 +8,26 @@ have been exercised; native lifecycle mutations have not been live-write-tested.
 
 ## Scope shown before confirmation
 
+Inspection identities and reset eligibility are different contracts. The general
+`preview_forwarding_lifecycle` removal schema accepts only `mapping:mcp:...` and
+`policy:mcp:...` keys. Digest-based app mapping keys (`mapping:<64 hex digits>`)
+belong to `preview_forwarding_reset`, when app management is enabled. Do not
+rewrite an inventory key or fabricate an MCP label to pass the other schema.
+
+Both inspection tools return `app_reset` guidance on mappings. Its `supported`
+flag describes structural eligibility for a fresh preview, not authorization or
+proof of effective connectivity. Existing identity/fingerprint checks and live
+enforcement checks still apply. `autoFirewall` metadata does not select policies;
+policy removal always requires an explicit selection.
+
+The current reset executor supports one explicit WAN UUID only. An omitted
+`wanUUID` uses native default WAN scope and must not be silently replaced by the
+selected WAN. Such mappings are reported as unsupported before reset planning;
+the original stored selectors are preserved. Supporting their migration requires
+a reviewed scope-preserving executor or a separately approved scope change with
+matching removal, enforcement and recovery proofs. This tool implements neither
+implicit narrowing nor automatic default-WAN adoption.
+
 Each action names a device, destination IPv4 address, current WAN UUID, TCP external
 and internal ports, and an explicit IPv4 source CIDR. A source of `0.0.0.0/0` means
 all IPv4 sources; there is no implicit source default. Up to four actions and eight
