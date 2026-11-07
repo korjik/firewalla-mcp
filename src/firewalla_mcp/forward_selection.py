@@ -15,7 +15,7 @@ def mapping_reset_support(mapping, mappings, selected_wan):
                 'reason':'Additional native scope selectors are unsupported by this single-WAN reset tool; preserve the mapping.'}
     if 'wanUUID' not in mapping:
         return {**report,'scope':'native_default_wans','code':'missing_wan_uuid',
-                'reason':'Mapping has no explicit wanUUID. Native default WAN scope is not the selected single WAN. Preserve this mapping; a scope-preserving workflow or separately approved scope migration is required and is not implemented by this reset tool.'}
+                'reason':'Mapping has no explicit wanUUID. Native default WAN scope is not the selected single WAN. Preserve this mapping; the guarded migration workflow requires one exact mapping, one replacement on the selected WAN with the same target/protocol/external port and a different internal port, no policy removals, all_mappings=false, verified enforcement and explicit scope-change confirmation.'}
     wan=mapping.get('wanUUID')
     if not isinstance(wan,str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}',wan):
         return {**report,'scope':'unreviewed','code':'unreviewed_wan_selector',
@@ -39,5 +39,5 @@ def mapping_reset_support(mapping, mappings, selected_wan):
 
 def require_reset_scope(mapping, mappings, selected_wan):
     report=mapping_reset_support(mapping,mappings,selected_wan)
-    if report['code'] in ('missing_wan_uuid','unreviewed_wan_selector','additional_scope_selectors','different_wan'):
+    if report['code'] in ('unreviewed_wan_selector','additional_scope_selectors','different_wan'):
         raise ValueError(report['reason'])

@@ -168,9 +168,9 @@ def build_server(config: Config, transport=None, readonly_catalog=False, vpn_wri
             No NAT66. Show every removal/creation and outage/partial-failure risk; get one
             explicit confirmation, then apply_forwarding_lifecycle. Expiry/drift stops execution;
             recovery after restart requires fresh confirmation and may allocate new policy IDs.
-            Accepts digest-based app mapping keys as well as MCP keys, but only supports
-            mappings with the selected explicit WAN UUID. Omitted/default WAN scope is
-            not equivalent to one WAN and cannot be migrated by this tool. autoFirewall
+            Accepts digest-based app mapping keys as well as MCP keys. Omitted/default
+            WAN scope is not equivalent to one WAN; only the guarded migration described
+            above can narrow it after explicit confirmation. autoFirewall
             metadata never selects or authorizes policy removal; policies stay explicit.
             """
             actions=[{k:v for k,v in a.model_dump().items() if k!='address_family'} for a in recreate]

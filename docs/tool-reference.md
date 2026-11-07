@@ -861,7 +861,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+app-forwarding`.
 
-Inspect exact app/MCP NAT objects and eligible explicit inbound allow candidates. Returns IDs, birth and semantic fingerprints; matching ports are not consent. Legacy Internet allows can cover IPv4 and IPv6/direct routed access. Global, inherited, shared or unreviewed policies are not automatically selected.
+Inspect exact app/MCP NAT objects and eligible explicit inbound allow candidates. Returns IDs, birth and semantic fingerprints; matching ports are not consent. Legacy Internet allows can cover IPv4 and IPv6/direct routed access. Global, inherited, shared or unreviewed policies are not automatically selected. Each mapping includes app_reset scope/support; an inventory key alone is not removal eligibility. Missing WAN UUIDs must not be narrowed implicitly.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -907,7 +907,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+lifecycle`, `combined+app-forwarding`.
 
-Read exact mapping/policy identities and fingerprints for a scoped WAN lifecycle. No rules change. This metadata is private. Missing/inherited policy evidence is not proof of absence. Use exact selections in a fresh preview; never delete objects merely because they have an MCP label or a lost plan ID.
+Read exact mapping/policy identities and fingerprints for a scoped WAN lifecycle. No rules change. This metadata is private. Missing/inherited policy evidence is not proof of absence. Use exact selections in a fresh preview; never delete objects merely because they have an MCP label or a lost plan ID. Digest-based app keys require preview_forwarding_reset, not the MCP-only lifecycle removal schema. Inspect each mapping's app_reset scope/support.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -1721,7 +1721,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+lifecycle`, `combined+app-forwarding`.
 
-Preview up to four TCP WAN forwards and scoped IPv4 inbound allows as one plan. Each action requires protocol=tcp, external_port, destination_port and source_network (explicit IPv4 CIDR). Removals require exact inventory key and fingerprint. Preserve equivalent NAT where possible; unrelated objects remain untouched. Allows cover matching routed/other-mapping IPv4 traffic through the selected WAN/device/ports; no exact original-IP or DNAT-only constraint. IPv6 sources are excluded and verified. Native changes are not atomic. Show all ordered steps, exposure and partial-failure risks and obtain explicit confirmation before apply_forwarding_lifecycle. SSH is internal.
+Preview up to four TCP WAN forwards and scoped IPv4 inbound allows as one plan. Each action requires protocol=tcp, external_port, destination_port and source_network (explicit IPv4 CIDR). Removals require exact inventory key and fingerprint. This removal schema accepts MCP keys only; digest-based app keys use preview_forwarding_reset with explicit adoption checks. Preserve equivalent NAT where possible; unrelated objects remain untouched. Allows cover matching routed/other-mapping IPv4 traffic through the selected WAN/device/ports; no exact original-IP or DNAT-only constraint. IPv6 sources are excluded and verified. Native changes are not atomic. Show all ordered steps, exposure and partial-failure risks and obtain explicit confirmation before apply_forwarding_lifecycle. SSH is internal.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -1771,6 +1771,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
           "type": "string"
         },
         "key": {
+          "description": "MCP lifecycle key only. Digest-based app mapping keys belong to preview_forwarding_reset, subject to its scope and dependency checks.",
           "pattern": "^(mapping|policy):mcp:[a-f0-9]{32}$",
           "title": "Key",
           "type": "string"
@@ -1959,7 +1960,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
 
 Catalogs: `combined+app-forwarding`.
 
-Preview exact owner-selected NAT and allow removals and named IPv4 recreation. At most eight selected mappings/policies, four new forwards, 32 ordered steps. all_mappings requires an exact complete inventory, never discovers extra deletions. App selection is explicit adoption, not ownership inferred from labels. Old legacy allows may be dual-stack; recreated forwards are IPv4 DNAT with scoped IPv4 allows. An omitted-WAN app mapping can migrate to this explicitly selected WAN only: select one mapping, no policies, all_mappings=false and one replacement with the same device/IP/protocol/external port and a different internal port. Show all-WAN to single-WAN narrowing and the new IPv4 inbound allow separately. Existing policies are preserved; autoFirewall metadata never proves ownership. Rollback restores original all-WAN scope and requires fresh confirmation. No NAT66. Show every removal/creation and outage/partial-failure risk; get one explicit confirmation, then apply_forwarding_lifecycle. Expiry/drift stops execution; recovery after restart requires fresh confirmation and may allocate new policy IDs.
+Preview exact owner-selected NAT and allow removals and named IPv4 recreation. At most eight selected mappings/policies, four new forwards, 32 ordered steps. all_mappings requires an exact complete inventory, never discovers extra deletions. App selection is explicit adoption, not ownership inferred from labels. Old legacy allows may be dual-stack; recreated forwards are IPv4 DNAT with scoped IPv4 allows. An omitted-WAN app mapping can migrate to this explicitly selected WAN only: select one mapping, no policies, all_mappings=false and one replacement with the same device/IP/protocol/external port and a different internal port. Show all-WAN to single-WAN narrowing and the new IPv4 inbound allow separately. Existing policies are preserved; autoFirewall metadata never proves ownership. Rollback restores original all-WAN scope and requires fresh confirmation. No NAT66. Show every removal/creation and outage/partial-failure risk; get one explicit confirmation, then apply_forwarding_lifecycle. Expiry/drift stops execution; recovery after restart requires fresh confirmation and may allocate new policy IDs. Accepts digest-based app mapping keys as well as MCP keys. Omitted/default WAN scope is not equivalent to one WAN; only the guarded migration described above can narrow it after explicit confirmation. autoFirewall metadata never selects or authorizes policy removal; policies stay explicit.
 
 Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint": true, "readOnlyHint": true}`
 
@@ -1975,6 +1976,7 @@ Annotations: `{"destructiveHint": false, "idempotentHint": true, "openWorldHint"
           "type": "string"
         },
         "key": {
+          "description": "Exact inspection key. A valid key is not reset eligibility: inspect app_reset and preserve mappings lacking the selected explicit WAN UUID.",
           "pattern": "^mapping:(?:mcp:[a-f0-9]{32}|[a-f0-9]{64})$",
           "title": "Key",
           "type": "string"

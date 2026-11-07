@@ -94,7 +94,7 @@ async def test_inspection_explains_scope_and_reset_creates_no_plan(reset_fixture
     assert selected['app_reset']==other['app_reset']
     assert selected['app_reset']['code']=='missing_wan_uuid'
     assert selected['fingerprint']==digest({k:v for k,v in selected.items() if k not in ('key','fingerprint','app_reset')})
-    with pytest.raises(ValueError,match='default WAN scope is not the selected single WAN'):
+    with pytest.raises(ValueError,match='Default WAN migration requires one mapping'):
         await fm.preview_app_reset(*args,[{k:selected[k] for k in ('key','fingerprint')}],[],[],False,int(time.time())+300)
     assert not fm.plans and store==before
 
